@@ -790,7 +790,7 @@ const LibraryActivity = ({ activity, usedInDays, onAddClick, onDelete, onEditLoc
           <MapPin size={16} />
         </a>
       )}
-      {activity.category === 'custom' && (
+      {(activity.category === 'custom' || activity.id?.startsWith('custom_') || activity.id?.startsWith('sugg_')) && (
         <button
           onClick={onDelete}
           style={{
@@ -1773,7 +1773,7 @@ const SuggestionsSheet = ({ stays, existingNames, onAdd, onClose }) => {
       category: p.category,
       emoji: p.emoji,
       coords: p.coords,
-      note: `≈ ${p.distKm} km van ${stay?.name ?? 'verblijf'} · via OpenStreetMap`,
+      note: `${p.label ? p.label + ' · ' : ''}≈ ${p.distKm} km van ${stay?.name ?? 'verblijf'}`,
     })));
   };
 
@@ -1900,8 +1900,15 @@ const SuggestionsSheet = ({ stays, existingNames, onAdd, onClose }) => {
                               {selected.has(r.idx) && <Check size={12} color={COLORS.cream} />}
                             </span>
                             <span style={{ fontSize: 14 }}>{r.emoji}</span>
-                            <span style={{ flex: 1, fontSize: 13, color: COLORS.charcoal, fontWeight: 500 }}>
-                              {r.name}
+                            <span style={{ flex: 1, minWidth: 0 }}>
+                              <span style={{ display: 'block', fontSize: 13, color: COLORS.charcoal, fontWeight: 500 }}>
+                                {r.name}
+                              </span>
+                              {r.label && (
+                                <span style={{ display: 'block', fontSize: 10, color: COLORS.inkLight, marginTop: 1 }}>
+                                  {r.label}
+                                </span>
+                              )}
                             </span>
                             <span style={{ fontSize: 11, color: COLORS.inkLight, whiteSpace: 'nowrap' }}>
                               {r.distKm} km
