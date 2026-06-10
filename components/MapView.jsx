@@ -32,7 +32,7 @@ async function fetchPlan() {
   return res.json();
 }
 
-async function savePlan(plan, customActivities, locationOverrides) {
+async function savePlan(plan, customActivities, locationOverrides, tripConfig) {
   const res = await fetch('/api/plan', {
     method: 'PUT',
     headers: {
@@ -43,6 +43,7 @@ async function savePlan(plan, customActivities, locationOverrides) {
       plan,
       customActivities,
       locationOverrides,
+      tripConfig,
       updatedBy: getName() || null,
     }),
   });
@@ -677,7 +678,7 @@ export default function MapView({ authRequired }) {
     setToast(`"${act?.name}" toegevoegd aan ${d?.dayShort} ${d?.date}`);
     setTimeout(() => setToast(null), 2500);
     try {
-      await savePlan(newPlan, customActivities, locationOverrides);
+      await savePlan(newPlan, customActivities, locationOverrides, tripConfig);
     } catch (e) {
       setToast('⚠️ Niet opgeslagen — controleer verbinding');
       setTimeout(() => setToast(null), 3500);

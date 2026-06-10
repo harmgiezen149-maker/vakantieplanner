@@ -105,16 +105,28 @@ export async function PUT(request) {
       return NextResponse.json({ error: 'Ongeldige body' }, { status: 400 });
     }
 
+    const redis = getRedis();
+
+    // Bescherming: als een client geen tripConfig meestuurt, behoud dan de
+    // reeds opgeslagen reisconfiguratie. Zo kan een gedeeltelijke opslag
+    // nooit per ongeluk de reisconfiguratie — en daarmee alle dagen — wissen.
+    // Een client die wél expliciet een (lege) tripConfig stuurt (zoals bij
+    // "Nieuwe vakantie starten") wordt gewoon gerespecteerd.
+    let tripConfig = sanitizeTripConfig(body.tripConfig);
+    if (body.tripConfig === undefined) {
+      const existing = normalize(await redis.get(PLAN_KEY));
+      if (existing?.tripConfig) tripConfig = existing.tripConfig;
+    }
+
     const data = {
       plan: body.plan && typeof body.plan === 'object' ? body.plan : {},
       customActivities: Array.isArray(body.customActivities) ? body.customActivities : [],
       locationOverrides: (body.locationOverrides && typeof body.locationOverrides === 'object') ? body.locationOverrides : {},
-      tripConfig: sanitizeTripConfig(body.tripConfig),
+      tripConfig,
       updatedAt: new Date().toISOString(),
       updatedBy: typeof body.updatedBy === 'string' ? body.updatedBy.slice(0, 40) : null,
     };
 
-    const redis = getRedis();
     await redis.set(PLAN_KEY, JSON.stringify(data));
 
     return NextResponse.json({ ...data, isInitial: false });
