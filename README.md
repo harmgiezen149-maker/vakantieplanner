@@ -58,14 +58,27 @@ Wil je dat alleen het gezin de planner kan zien? Voeg een PIN toe:
 
 Zonder deze variabele is de URL gewoon publiek (URL is dan de "geheime" toegangssleutel).
 
-### 5. (Optioneel) OpenRouteService voor routes
+### 5. (Aanbevolen) Geoapify voor omgevingssuggesties
+
+De "Ontdek de omgeving"-knop zoekt bezienswaardigheden, zwemplekken en
+supermarkten rond je verblijven. Zonder key valt de app terug op de gratis
+publieke OpenStreetMap-servers (Overpass), maar die weigeren Vercel's
+gedeelde IP-adressen regelmatig. Met een gratis Geoapify-key werkt het
+betrouwbaar:
+
+1. Maak een gratis account op [geoapify.com](https://www.geoapify.com/) (3000 aanvragen/dag)
+2. Maak in hun dashboard een project aan en kopieer de API key
+3. Voeg in Vercel toe: `GEOAPIFY_API_KEY` = `jouw-key`
+4. Redeploy
+
+### 6. (Optioneel) OpenRouteService voor routes
 
 De kaart toont per dag een route met afstand en rijtijd. Standaard gebruikt de app de publieke OSRM-server (geen key nodig, fair-use). Voor nauwkeurigere en stabielere routeberekening:
 
 1. Maak een gratis key aan op [openrouteservice.org](https://openrouteservice.org/dev/#/signup)
 2. Voeg in Vercel toe: `ORS_API_KEY` = `jouw-key`
 
-### 6. Redeploy
+### 7. Redeploy
 
 1. Ga naar **Deployments** → klik op de laatste deploy → **Redeploy**
 2. Wacht ~1 minuut → klaar!

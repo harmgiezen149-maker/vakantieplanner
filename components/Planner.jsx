@@ -1729,9 +1729,11 @@ const SuggestionsSheet = ({ stays, existingNames, onAdd, onClose }) => {
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
-        throw new Error(d.error === 'rate_limited'
-          ? 'Even te veel aanvragen — probeer het over een minuut opnieuw.'
-          : 'Suggesties ophalen mislukt. Probeer het later opnieuw.');
+        if (d.error === 'rate_limited') {
+          throw new Error('Even te veel aanvragen — probeer het over een minuut opnieuw.');
+        }
+        const detail = [d.error || `status ${res.status}`, d.detail].filter(Boolean).join(' · ');
+        throw new Error(`Suggesties ophalen mislukt (${detail}). Probeer het later opnieuw.`);
       }
       const data = await res.json();
       const fresh = (data.suggestions || [])
