@@ -75,11 +75,13 @@ export default function Checklist() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const saveTimer = useRef(null);
+  // True zolang een lokale wijziging nog niet is opgeslagen. Voorkomt dat
+  // de focus-refresh (vuurt o.a. na een confirm-popup) de wijziging
+  // overschrijft met oude serverdata.
+  const dirty = useRef(false);
 
-  // Naam onthouden in geheugen (geen localStorage in artifact-context;
-  // op de echte Vercel-site werkt localStorage wél — daar kun je dit
-  // omzetten naar localStorage.getItem/setItem als je wilt).
   const load = useCallback(async () => {
+    if (dirty.current) return;
     try {
       const res = await fetch('/api/checklist');
       const data = await res.json();
@@ -101,6 +103,7 @@ export default function Checklist() {
   }, [load]);
 
   const persist = useCallback((nextChecked) => {
+    dirty.current = true;
     clearTimeout(saveTimer.current);
     setSaving(true);
     saveTimer.current = setTimeout(async () => {
@@ -113,8 +116,9 @@ export default function Checklist() {
         const data = await res.json();
         setUpdatedBy(data.updatedBy ?? null);
         setUpdatedAt(data.updatedAt ?? null);
+        dirty.current = false;
       } catch {
-        // negeer; volgende toggle probeert opnieuw
+        // negeer; volgende toggle probeert opnieuw (dirty blijft staan)
       } finally {
         setSaving(false);
       }

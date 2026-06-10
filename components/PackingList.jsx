@@ -25,8 +25,13 @@ export default function PackingList() {
   const saveTimer = useRef(null);
   // Houd de laatste staat vast zodat de debounced save altijd het nieuwste pakt
   const latest = useRef({ categories: [], items: [] });
+  // True zolang er een lokale wijziging nog niet (volledig) is opgeslagen.
+  // Voorkomt dat de focus-refresh (die o.a. vuurt na een confirm-popup)
+  // de lokale wijziging overschrijft met oude serverdata.
+  const dirty = useRef(false);
 
   const load = useCallback(async () => {
+    if (dirty.current) return;
     try {
       const res = await fetch('/api/inpakken');
       const data = await res.json();
@@ -52,6 +57,7 @@ export default function PackingList() {
   // Centrale opslag: debounced, gebruikt altijd de meest recente ref-waarden
   const persist = useCallback((nextCats, nextItems) => {
     latest.current = { categories: nextCats, items: nextItems };
+    dirty.current = true;
     clearTimeout(saveTimer.current);
     setSaving(true);
     saveTimer.current = setTimeout(async () => {
@@ -68,8 +74,9 @@ export default function PackingList() {
         const data = await res.json();
         setUpdatedBy(data.updatedBy ?? null);
         setUpdatedAt(data.updatedAt ?? null);
+        dirty.current = false;
       } catch {
-        // negeer; volgende wijziging probeert opnieuw
+        // negeer; volgende wijziging probeert opnieuw (dirty blijft staan)
       } finally {
         setSaving(false);
       }

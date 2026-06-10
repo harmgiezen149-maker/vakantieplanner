@@ -6,7 +6,7 @@ import {
   Plus, X, Trash2, Sparkles, Calendar as CalendarIcon,
   ChevronRight, RefreshCw, User, Wifi, WifiOff, Check, AlertCircle, Lock, MapPin, Map as MapIcon,
   Pencil, Search, Loader2, Car, ChevronUp, ChevronDown, CheckSquare, Backpack,
-  Settings, Home, CalendarRange,
+  Settings, Home, CalendarRange, Compass,
 } from 'lucide-react';
 import {
   COLORS, CATEGORIES, CATEGORY_ORDER, DEFAULT_ACTIVITIES,
@@ -814,7 +814,7 @@ const LibraryActivity = ({ activity, usedInDays, onAddClick, onDelete, onEditLoc
   );
 };
 
-const LibraryView = ({ activities, plan, onAddClick, onCreateCustom, onDeleteCustom, onEditLocation }) => {
+const LibraryView = ({ activities, plan, onAddClick, onCreateCustom, onDeleteCustom, onEditLocation, onOpenSuggestions }) => {
   const planUsage = useMemo(() => {
     const usage = {};
     Object.values(plan).flat().forEach(id => { usage[id] = (usage[id] || 0) + 1; });
@@ -833,6 +833,20 @@ const LibraryView = ({ activities, plan, onAddClick, onCreateCustom, onDeleteCus
 
   return (
     <div style={{ padding: '16px 20px 100px' }}>
+      <button
+        onClick={onOpenSuggestions}
+        style={{
+          width: '100%', padding: 14,
+          background: COLORS.forest, color: COLORS.cream, border: 'none',
+          borderRadius: 12, fontSize: 14, fontFamily: "'DM Sans', sans-serif",
+          fontWeight: 600, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          marginBottom: 10,
+          boxShadow: '0 2px 8px rgba(45, 79, 62, 0.25)',
+        }}
+      >
+        <Compass size={16} /> Ontdek de omgeving van je verblijf
+      </button>
       <button
         onClick={onCreateCustom}
         style={{
@@ -1689,6 +1703,239 @@ const ConfirmSheet = ({ title, message, confirmText, onConfirm, onClose }) => (
   </Sheet>
 );
 
+// ============ OMGEVINGSSUGGESTIES ============
+
+const SuggestionsSheet = ({ stays, existingNames, onAdd, onClose }) => {
+  const staysWithCoords = stays.filter(s => s.coords);
+  const [stayId, setStayId] = useState(staysWithCoords[0]?.id ?? null);
+  const [radiusKm, setRadiusKm] = useState(20);
+  const [state, setState] = useState('idle'); // idle | loading | done | error
+  const [results, setResults] = useState([]);
+  const [selected, setSelected] = useState(new Set());
+  const [errMsg, setErrMsg] = useState('');
+
+  const stay = staysWithCoords.find(s => s.id === stayId) || null;
+
+  const search = async () => {
+    if (!stay) return;
+    setState('loading');
+    setResults([]);
+    setSelected(new Set());
+    try {
+      const res = await fetch('/api/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Family-Pin': getPin() },
+        body: JSON.stringify({ lat: stay.coords[0], lng: stay.coords[1], radius: radiusKm * 1000 }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error === 'rate_limited'
+          ? 'Even te veel aanvragen — probeer het over een minuut opnieuw.'
+          : 'Suggesties ophalen mislukt. Probeer het later opnieuw.');
+      }
+      const data = await res.json();
+      const fresh = (data.suggestions || [])
+        .filter(s => !existingNames.has(s.name.toLowerCase()));
+      setResults(fresh);
+      // Standaard alles aangevinkt zou te veel zijn; start leeg
+      setState('done');
+    } catch (e) {
+      setErrMsg(e.message);
+      setState('error');
+    }
+  };
+
+  const toggle = (idx) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx); else next.add(idx);
+      return next;
+    });
+  };
+
+  const grouped = useMemo(() => {
+    const out = {};
+    results.forEach((r, idx) => {
+      const cat = CATEGORIES[r.category] ? r.category : 'custom';
+      if (!out[cat]) out[cat] = [];
+      out[cat].push({ ...r, idx });
+    });
+    return out;
+  }, [results]);
+
+  const confirmAdd = () => {
+    const picked = results.filter((_, idx) => selected.has(idx));
+    if (picked.length === 0) return;
+    onAdd(picked.map(p => ({
+      name: p.name,
+      category: p.category,
+      emoji: p.emoji,
+      coords: p.coords,
+      note: `≈ ${p.distKm} km van ${stay?.name ?? 'verblijf'} · via OpenStreetMap`,
+    })));
+  };
+
+  return (
+    <Sheet onClose={onClose} title="Ontdek de omgeving">
+      <div style={{ padding: '16px 20px 24px' }}>
+        {staysWithCoords.length === 0 ? (
+          <div style={{ fontSize: 14, color: COLORS.ink, lineHeight: 1.6 }}>
+            Geen verblijf met een locatie gevonden. Stel eerst bij "Reis instellen"
+            een locatie in voor je camping of huisje — daarna kan ik de omgeving
+            doorzoeken op bezienswaardigheden, zwemplekken en supermarkten.
+          </div>
+        ) : (
+          <>
+            <p style={{ fontSize: 13, color: COLORS.inkLight, margin: '0 0 14px', lineHeight: 1.5 }}>
+              Zoekt via OpenStreetMap naar bezienswaardigheden, musea, kastelen,
+              uitkijkpunten, zwemplekken, markten en supermarkten rond je verblijf.
+              Vink aan wat je interessant vindt — die komen in je activiteitenlijst.
+            </p>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+              {staysWithCoords.map(s => (
+                <button
+                  key={s.id}
+                  onClick={() => { setStayId(s.id); setState('idle'); setResults([]); }}
+                  style={{
+                    padding: '8px 14px', borderRadius: 99, fontSize: 13, fontWeight: 600,
+                    fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
+                    background: stayId === s.id ? s.color : 'transparent',
+                    color: stayId === s.id ? COLORS.cream : COLORS.ink,
+                    border: `1px solid ${stayId === s.id ? s.color : COLORS.hairline}`,
+                  }}
+                >🏡 {s.name}</button>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <span style={{ fontSize: 13, color: COLORS.ink }}>Zoekstraal:</span>
+              {[10, 20, 30].map(km => (
+                <button
+                  key={km}
+                  onClick={() => setRadiusKm(km)}
+                  style={{
+                    padding: '6px 12px', borderRadius: 99, fontSize: 12, fontWeight: 600,
+                    fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
+                    background: radiusKm === km ? COLORS.forest : 'transparent',
+                    color: radiusKm === km ? COLORS.cream : COLORS.ink,
+                    border: `1px solid ${radiusKm === km ? COLORS.forest : COLORS.hairline}`,
+                  }}
+                >{km} km</button>
+              ))}
+            </div>
+
+            <button
+              onClick={search}
+              disabled={state === 'loading' || !stay}
+              style={{
+                width: '100%', padding: 13,
+                background: state === 'loading' ? COLORS.inkLight : COLORS.forest,
+                color: COLORS.cream, border: 'none', borderRadius: 12,
+                fontSize: 14, fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
+                cursor: state === 'loading' ? 'wait' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                marginBottom: 16,
+              }}
+            >
+              {state === 'loading'
+                ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Omgeving doorzoeken…</>
+                : <><Compass size={16} /> Zoek rond {stay?.name ?? 'verblijf'}</>}
+            </button>
+
+            {state === 'error' && (
+              <div style={{
+                padding: 12, borderRadius: 10, fontSize: 13,
+                background: 'rgba(201, 125, 93, 0.12)', color: COLORS.sunset,
+                marginBottom: 12,
+              }}>{errMsg}</div>
+            )}
+
+            {state === 'done' && results.length === 0 && (
+              <div style={{ fontSize: 13, color: COLORS.inkLight }}>
+                Niets nieuws gevonden binnen {radiusKm} km. Probeer een grotere
+                zoekstraal, of voeg zelf activiteiten toe.
+              </div>
+            )}
+
+            {results.length > 0 && (
+              <>
+                {CATEGORY_ORDER.map(catKey => {
+                  const list = grouped[catKey];
+                  if (!list || list.length === 0) return null;
+                  const cat = CATEGORIES[catKey];
+                  return (
+                    <div key={catKey} style={{ marginBottom: 18 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <span style={{ fontSize: 14 }}>{cat.emoji}</span>
+                        <span style={{
+                          fontFamily: "'Fraunces', serif", fontSize: 15,
+                          fontWeight: 500, color: cat.color,
+                        }}>{cat.name}</span>
+                        <span style={{ flex: 1, height: 1, background: COLORS.hairline }} />
+                        <span style={{ fontSize: 11, color: COLORS.inkLight }}>{list.length}</span>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {list.map(r => (
+                          <button
+                            key={r.idx}
+                            onClick={() => toggle(r.idx)}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 10,
+                              padding: '10px 12px', width: '100%', textAlign: 'left',
+                              background: selected.has(r.idx) ? `${cat.color}1A` : COLORS.creamSoft,
+                              border: `1px solid ${selected.has(r.idx) ? cat.color : 'transparent'}`,
+                              borderRadius: 10, cursor: 'pointer',
+                              fontFamily: "'DM Sans', sans-serif",
+                            }}
+                          >
+                            <span style={{
+                              width: 18, height: 18, borderRadius: 5, flexShrink: 0,
+                              border: `2px solid ${selected.has(r.idx) ? cat.color : COLORS.hairline}`,
+                              background: selected.has(r.idx) ? cat.color : 'transparent',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}>
+                              {selected.has(r.idx) && <Check size={12} color={COLORS.cream} />}
+                            </span>
+                            <span style={{ fontSize: 14 }}>{r.emoji}</span>
+                            <span style={{ flex: 1, fontSize: 13, color: COLORS.charcoal, fontWeight: 500 }}>
+                              {r.name}
+                            </span>
+                            <span style={{ fontSize: 11, color: COLORS.inkLight, whiteSpace: 'nowrap' }}>
+                              {r.distKm} km
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                <button
+                  onClick={confirmAdd}
+                  disabled={selected.size === 0}
+                  style={{
+                    width: '100%', padding: 14, marginTop: 4,
+                    background: selected.size === 0 ? COLORS.hairline : COLORS.sunset,
+                    color: selected.size === 0 ? COLORS.inkLight : COLORS.cream,
+                    border: 'none', borderRadius: 12,
+                    fontSize: 14, fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
+                    cursor: selected.size === 0 ? 'default' : 'pointer',
+                  }}
+                >
+                  {selected.size === 0
+                    ? 'Vink activiteiten aan om toe te voegen'
+                    : `${selected.size} ${selected.size === 1 ? 'activiteit' : 'activiteiten'} toevoegen`}
+                </button>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </Sheet>
+  );
+};
+
 const SettingsSheet = ({ onClose, onOpenTripSettings, onClearPlan, onNewVacation }) => (
   <Sheet onClose={onClose} title="Planning beheren">
     <div style={{ padding: '8px 20px 24px', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -2026,6 +2273,7 @@ export default function Planner({ authRequired }) {
             onCreateCustom={() => setSheet({ type: 'create-custom' })}
             onDeleteCustom={deleteCustom}
             onEditLocation={(act) => setSheet({ type: 'edit-location', activityId: act.id })}
+            onOpenSuggestions={() => setSheet({ type: 'suggestions' })}
           />
         )}
 
@@ -2068,6 +2316,30 @@ export default function Planner({ authRequired }) {
           plan={plan}
           days={days}
           onPick={(dayKey) => { addActivityToDay(dayKey, sheet.activityId); setSheet(null); }}
+          onClose={() => setSheet(null)}
+        />
+      )}
+
+      {sheet?.type === 'suggestions' && (
+        <SuggestionsSheet
+          stays={stays}
+          existingNames={new Set(allActivities.map(a => a.name.toLowerCase()))}
+          onAdd={(picked) => {
+            const ts = Date.now();
+            setCustomActivities(cs => [
+              ...cs,
+              ...picked.map((p, i) => ({
+                id: `sugg_${ts}_${i}`,
+                name: p.name,
+                category: p.category,
+                emoji: p.emoji,
+                coords: p.coords,
+                note: p.note,
+                custom: true,
+              })),
+            ]);
+            setSheet(null);
+          }}
           onClose={() => setSheet(null)}
         />
       )}
