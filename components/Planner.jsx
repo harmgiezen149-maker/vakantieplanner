@@ -6,7 +6,7 @@ import {
   Plus, X, Trash2, Sparkles, Calendar as CalendarIcon,
   ChevronRight, RefreshCw, User, Wifi, WifiOff, Check, AlertCircle, Lock, MapPin, Map as MapIcon,
   Pencil, Search, Loader2, Car, ChevronUp, ChevronDown, CheckSquare, Backpack, ExternalLink,
-  Settings, Home, CalendarRange, Compass,
+  Settings, Home, CalendarRange, Compass, Maximize2, Minimize2,
 } from 'lucide-react';
 import {
   COLORS, CATEGORIES, CATEGORY_ORDER, DEFAULT_ACTIVITIES,
@@ -1714,6 +1714,21 @@ const SuggestionsMap = ({ stay, results, selected, onToggle }) => {
   const leafletRef = useRef(null);
   const markersRef = useRef([]);
   const [ready, setReady] = useState(false);
+  const [full, setFull] = useState(false);
+
+  // Kaartmaat herberekenen bij wisselen klein ↔ volledig scherm
+  useEffect(() => {
+    const t = setTimeout(() => mapRef.current?.invalidateSize(), 80);
+    return () => clearTimeout(t);
+  }, [full]);
+
+  // Esc sluit volledig scherm
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e) => { if (e.key === 'Escape') setFull(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [full]);
 
   // Refs zodat de popup-handler altijd de actuele state ziet
   const onToggleRef = useRef(onToggle);
@@ -1855,7 +1870,13 @@ const SuggestionsMap = ({ stay, results, selected, onToggle }) => {
         </div>
       `, { closeButton: false });
 
-      m.on('mouseover', () => m.openPopup());
+      const hasHover = typeof window !== 'undefined'
+        && window.matchMedia('(hover: hover)').matches;
+      if (hasHover) {
+        m.on('mouseover', () => m.openPopup());
+        // Klik selecteert direct; Leaflet sluit daarbij zelf de popup
+        m.on('click', () => onToggleRef.current(idx));
+      }
       markersRef.current.push(m);
     });
 
@@ -1869,13 +1890,45 @@ const SuggestionsMap = ({ stay, results, selected, onToggle }) => {
 
   return (
     <div
-      ref={containerRef}
-      style={{
-        width: '100%', height: 380, borderRadius: 12,
-        overflow: 'hidden', border: `1px solid ${COLORS.hairline}`,
-        marginBottom: 14, zIndex: 0, position: 'relative',
+      style={full ? {
+        position: 'fixed', inset: 0, zIndex: 70,
+        background: COLORS.cream, padding: 10,
+        display: 'flex', flexDirection: 'column',
+      } : {
+        position: 'relative', marginBottom: 14,
       }}
-    />
+    >
+      <div
+        ref={containerRef}
+        style={{
+          width: '100%',
+          height: full ? '100%' : 380,
+          flex: full ? 1 : undefined,
+          borderRadius: 12,
+          overflow: 'hidden', border: `1px solid ${COLORS.hairline}`,
+          zIndex: 0, position: 'relative',
+        }}
+      />
+      <button
+        onClick={() => setFull(f => !f)}
+        title={full ? 'Verkleinen' : 'Volledig scherm'}
+        aria-label={full ? 'Verkleinen' : 'Volledig scherm'}
+        style={{
+          position: 'absolute',
+          top: full ? 20 : 10,
+          right: full ? 20 : 10,
+          zIndex: 1001,
+          width: 36, height: 36, borderRadius: 10,
+          border: `1px solid ${COLORS.hairline}`,
+          background: COLORS.cream, color: COLORS.forest,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer',
+          boxShadow: '0 2px 8px rgba(31,41,34,0.2)',
+        }}
+      >
+        {full ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+      </button>
+    </div>
   );
 };
 
