@@ -6,7 +6,7 @@ import {
   Plus, X, Trash2, Sparkles, Calendar as CalendarIcon,
   ChevronRight, RefreshCw, User, Wifi, WifiOff, Check, AlertCircle, Lock, MapPin, Map as MapIcon,
   Pencil, Search, Loader2, Car, ChevronUp, ChevronDown, CheckSquare, Backpack, ExternalLink,
-  Settings, Home, CalendarRange, Compass, Maximize2, Minimize2,
+  Settings, Home, CalendarRange, Compass, Maximize2, Minimize2, EyeOff,
 } from 'lucide-react';
 import {
   COLORS, CATEGORIES, CATEGORY_ORDER, DEFAULT_ACTIVITIES,
@@ -44,14 +44,14 @@ async function apiGet() {
   return res.json();
 }
 
-async function apiPut(plan, customActivities, locationOverrides, tripConfig, name) {
+async function apiPut(plan, customActivities, locationOverrides, tripConfig, suggestExclusions, name) {
   const res = await fetch('/api/plan', {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
       'X-Family-Pin': getPin(),
     },
-    body: JSON.stringify({ plan, customActivities, locationOverrides, tripConfig, updatedBy: name || null }),
+    body: JSON.stringify({ plan, customActivities, locationOverrides, tripConfig, suggestExclusions, updatedBy: name || null }),
   });
   if (!res.ok) throw new Error(res.status === 401 ? 'unauthorized' : `HTTP ${res.status}`);
   return res.json();
@@ -1708,7 +1708,7 @@ const ConfirmSheet = ({ title, message, confirmText, onConfirm, onClose }) => (
 
 // Kaartweergave van zoekresultaten. Markers per categorie (kleur + emoji),
 // hover/klik toont popup met info en een selecteer-knop.
-const SuggestionsMap = ({ stay, results, selected, onToggle }) => {
+const SuggestionsMap = ({ stay, results, selected, onToggle, onHide }) => {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const leafletRef = useRef(null);
@@ -1733,6 +1733,8 @@ const SuggestionsMap = ({ stay, results, selected, onToggle }) => {
   // Refs zodat de popup-handler altijd de actuele state ziet
   const onToggleRef = useRef(onToggle);
   onToggleRef.current = onToggle;
+  const onHideRef = useRef(onHide);
+  onHideRef.current = onHide;
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
 
@@ -1766,10 +1768,18 @@ const SuggestionsMap = ({ stay, results, selected, onToggle }) => {
 
         // Selecteer-knop in popups koppelen
         map.on('popupopen', (e) => {
-          const btn = e.popup.getElement()?.querySelector('[data-sugg-idx]');
+          const el = e.popup.getElement();
+          const btn = el?.querySelector('[data-sugg-idx]');
           if (btn) {
             btn.onclick = () => {
               onToggleRef.current(Number(btn.dataset.suggIdx));
+              map.closePopup();
+            };
+          }
+          const hideBtn = el?.querySelector('[data-sugg-hide]');
+          if (hideBtn) {
+            hideBtn.onclick = () => {
+              onHideRef.current(Number(hideBtn.dataset.suggHide));
               map.closePopup();
             };
           }
@@ -1867,6 +1877,12 @@ const SuggestionsMap = ({ stay, results, selected, onToggle }) => {
               white-space:nowrap;
             ">Maps ↗</a>
           </div>
+          <button data-sugg-hide="${idx}" style="
+            width:100%; margin-top:6px; padding:5px 8px;
+            border:none; background:transparent; cursor:pointer;
+            font-family:'DM Sans',sans-serif; font-size:10.5px;
+            color:rgba(31,41,34,0.5); text-decoration:underline;
+          ">Niet meer tonen in suggesties</button>
         </div>
       `, { closeButton: false });
 
@@ -1932,7 +1948,7 @@ const SuggestionsMap = ({ stay, results, selected, onToggle }) => {
   );
 };
 
-const SuggestionsSheet = ({ stays, existingNames, existingCoords, onAdd, onClose }) => {
+const SuggestionsSheet = ({ stays, existingNames, existingCoords, exclusions, onExclude, onClearExclusions, onAdd, onClose }) => {
   // Een suggestie geldt als "al toegevoegd" wanneer de naam overeenkomt
   // óf wanneer hij binnen ~60 m van een bestaande activiteit ligt.
   const isAlreadyAdded = (sugg) => {
@@ -1940,6 +1956,31 @@ const SuggestionsSheet = ({ stays, existingNames, existingCoords, onAdd, onClose
     return (existingCoords || []).some(([la, ln]) =>
       Math.abs(la - sugg.coords[0]) < 0.0006 && Math.abs(ln - sugg.coords[1]) < 0.0009
     );
+  };
+
+  // Door de gebruiker verborgen suggesties (naam óf locatie binnen ~60 m)
+  const isExcluded = (sugg) => (exclusions || []).some(ex =>
+    ex.name?.toLowerCase() === sugg.name.toLowerCase() ||
+    (Array.isArray(ex.coords) &&
+      Math.abs(ex.coords[0] - sugg.coords[0]) < 0.0006 &&
+      Math.abs(ex.coords[1] - sugg.coords[1]) < 0.0009)
+  );
+
+  // Verberg een resultaat: registreer de uitsluiting en haal hem uit de
+  // huidige lijst. Selectie-indices schuiven mee.
+  const hideResult = (idx) => {
+    const r = results[idx];
+    if (!r) return;
+    onExclude({ name: r.name, coords: r.coords });
+    setResults(rs => rs.filter((_, i) => i !== idx));
+    setSelected(prev => {
+      const next = new Set();
+      prev.forEach(i => {
+        if (i === idx) return;
+        next.add(i > idx ? i - 1 : i);
+      });
+      return next;
+    });
   };
   const staysWithCoords = stays.filter(s => s.coords);
   const [stayId, setStayId] = useState(staysWithCoords[0]?.id ?? null);
@@ -1977,7 +2018,8 @@ const SuggestionsSheet = ({ stays, existingNames, existingCoords, onAdd, onClose
         throw new Error(`Suggesties ophalen mislukt (${detail}). Probeer het later opnieuw.`);
       }
       const data = await res.json();
-      const fresh = (data.suggestions || []).filter(s => !isAlreadyAdded(s));
+      const fresh = (data.suggestions || [])
+        .filter(s => !isAlreadyAdded(s) && !isExcluded(s));
       setResults(fresh);
       // Standaard alles aangevinkt zou te veel zijn; start leeg
       setState('done');
@@ -2131,6 +2173,7 @@ const SuggestionsSheet = ({ stays, existingNames, existingCoords, onAdd, onClose
                     results={results}
                     selected={selected}
                     onToggle={toggle}
+                    onHide={hideResult}
                   />
                 )}
 
@@ -2196,6 +2239,16 @@ const SuggestionsSheet = ({ stays, existingNames, existingCoords, onAdd, onClose
                                 {r.distKm} km
                               </span>
                               <span style={{ display: 'flex', gap: 6 }}>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); hideResult(r.idx); }}
+                                  title="Niet meer tonen"
+                                  aria-label="Niet meer tonen"
+                                  style={{
+                                    border: 'none', background: 'transparent',
+                                    color: COLORS.inkLight, display: 'flex',
+                                    alignItems: 'center', padding: 2, cursor: 'pointer',
+                                  }}
+                                ><EyeOff size={13} /></button>
                                 <a
                                   href={`https://www.google.com/maps/search/?api=1&query=${r.coords[0]},${r.coords[1]}`}
                                   target="_blank"
@@ -2248,6 +2301,24 @@ const SuggestionsSheet = ({ stays, existingNames, existingCoords, onAdd, onClose
                     : `${selected.size} ${selected.size === 1 ? 'activiteit' : 'activiteiten'} toevoegen`}
                 </button>
               </>
+            )}
+
+            {(exclusions?.length ?? 0) > 0 && (
+              <div style={{
+                marginTop: 14, fontSize: 12, color: COLORS.inkLight,
+                display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center',
+              }}>
+                <EyeOff size={13} />
+                {exclusions.length} {exclusions.length === 1 ? 'suggestie' : 'suggesties'} verborgen
+                <button
+                  onClick={onClearExclusions}
+                  style={{
+                    border: 'none', background: 'transparent', cursor: 'pointer',
+                    fontFamily: "'DM Sans', sans-serif", fontSize: 12,
+                    color: COLORS.forest, textDecoration: 'underline', padding: 0,
+                  }}
+                >alles opnieuw tonen</button>
+              </div>
             )}
           </>
         )}
@@ -2334,6 +2405,8 @@ export default function Planner({ authRequired }) {
   const [plan, setPlan] = useState({});
   const [customActivities, setCustomActivities] = useState([]);
   const [locationOverrides, setLocationOverrides] = useState({});
+  // Suggesties die de gebruiker heeft verborgen: [{ name, coords }]
+  const [suggestExclusions, setSuggestExclusions] = useState([]);
   const [tripConfig, setTripConfig] = useState(DEFAULT_TRIP_CONFIG);
   const [loading, setLoading] = useState(true);
   const [sheet, setSheet] = useState(null);
@@ -2362,6 +2435,7 @@ export default function Planner({ authRequired }) {
       setPlan(data.plan || {});
       setCustomActivities(data.customActivities || []);
       setLocationOverrides(data.locationOverrides || {});
+      setSuggestExclusions(data.suggestExclusions || []);
       setTripConfig(data.tripConfig || DEFAULT_TRIP_CONFIG);
       setServerUpdate({ at: data.updatedAt, by: data.updatedBy });
       setSyncStatus('synced');
@@ -2405,7 +2479,7 @@ export default function Planner({ authRequired }) {
     setSyncStatus('syncing');
     saveTimer.current = setTimeout(async () => {
       try {
-        const data = await apiPut(plan, customActivities, locationOverrides, tripConfig, name);
+        const data = await apiPut(plan, customActivities, locationOverrides, tripConfig, suggestExclusions, name);
         setServerUpdate({ at: data.updatedAt, by: data.updatedBy });
         setSyncStatus('synced');
         setTimeout(() => setSyncStatus('idle'), 1500);
@@ -2414,7 +2488,7 @@ export default function Planner({ authRequired }) {
       }
     }, 500);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [plan, customActivities, locationOverrides, tripConfig, name, unlocked, loading]);
+  }, [plan, customActivities, locationOverrides, tripConfig, suggestExclusions, name, unlocked, loading]);
 
   // Dynamische dagenlijst uit de reisconfiguratie
   const days = useMemo(() => buildDays(tripConfig), [tripConfig]);
@@ -2645,6 +2719,9 @@ export default function Planner({ authRequired }) {
           stays={stays}
           existingNames={new Set(allActivities.map(a => a.name.toLowerCase()))}
           existingCoords={allActivities.filter(a => a.coords).map(a => a.coords)}
+          exclusions={suggestExclusions}
+          onExclude={(ex) => setSuggestExclusions(xs => [...xs, ex])}
+          onClearExclusions={() => setSuggestExclusions([])}
           onAdd={(picked) => {
             const ts = Date.now();
             setCustomActivities(cs => [
@@ -2702,6 +2779,7 @@ export default function Planner({ authRequired }) {
                 setPlan({});
                 setCustomActivities([]);
                 setLocationOverrides({});
+                setSuggestExclusions([]);
                 setTripConfig(DEFAULT_TRIP_CONFIG);
                 // Open daarna direct de reisinstellingen
                 setTimeout(() => setSheet({ type: 'trip-settings' }), 0);

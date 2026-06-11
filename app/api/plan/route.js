@@ -107,15 +107,32 @@ export async function PUT(request) {
 
     const redis = getRedis();
 
-    // Bescherming: als een client geen tripConfig meestuurt, behoud dan de
-    // reeds opgeslagen reisconfiguratie. Zo kan een gedeeltelijke opslag
-    // nooit per ongeluk de reisconfiguratie — en daarmee alle dagen — wissen.
-    // Een client die wél expliciet een (lege) tripConfig stuurt (zoals bij
-    // "Nieuwe vakantie starten") wordt gewoon gerespecteerd.
+    // Bescherming: velden die een client niet meestuurt worden niet gewist
+    // maar behouden uit de opgeslagen staat. Een client die ze wél expliciet
+    // (eventueel leeg) meestuurt — zoals bij "Nieuwe vakantie starten" —
+    // wordt gewoon gerespecteerd.
     let tripConfig = sanitizeTripConfig(body.tripConfig);
-    if (body.tripConfig === undefined) {
+    let suggestExclusions = Array.isArray(body.suggestExclusions)
+      ? body.suggestExclusions.slice(0, 500)
+          .map(e => ({
+            name: String(e?.name || '').slice(0, 80),
+            coords: (Array.isArray(e?.coords) && e.coords.length === 2
+              && isFinite(Number(e.coords[0])) && isFinite(Number(e.coords[1])))
+              ? [Number(e.coords[0]), Number(e.coords[1])]
+              : null,
+          }))
+          .filter(e => e.name)
+      : undefined;
+
+    if (body.tripConfig === undefined || suggestExclusions === undefined) {
       const existing = normalize(await redis.get(PLAN_KEY));
-      if (existing?.tripConfig) tripConfig = existing.tripConfig;
+      if (body.tripConfig === undefined && existing?.tripConfig) {
+        tripConfig = existing.tripConfig;
+      }
+      if (suggestExclusions === undefined) {
+        suggestExclusions = Array.isArray(existing?.suggestExclusions)
+          ? existing.suggestExclusions : [];
+      }
     }
 
     const data = {
@@ -123,6 +140,7 @@ export async function PUT(request) {
       customActivities: Array.isArray(body.customActivities) ? body.customActivities : [],
       locationOverrides: (body.locationOverrides && typeof body.locationOverrides === 'object') ? body.locationOverrides : {},
       tripConfig,
+      suggestExclusions,
       updatedAt: new Date().toISOString(),
       updatedBy: typeof body.updatedBy === 'string' ? body.updatedBy.slice(0, 40) : null,
     };
