@@ -66,11 +66,19 @@ const KINDS = [
 ];
 
 // Bouw suggestielijst uit ruwe kandidaten [{name, coords, kind}]
-function buildSuggestions(candidates, origin) {
+// rMinKm: ondergrens van de afstandsband (resultaten dichterbij vallen af).
+// Kandidaten worden eerst op afstand gesorteerd, zodat de limiet per soort
+// (max N supermarkten etc.) altijd de dichtstbijzijnde exemplaren kiest.
+function buildSuggestions(candidates, origin, rMinKm = 0) {
+  const withDist = candidates
+    .map(c => ({ ...c, _dist: haversineKm(origin, c.coords) }))
+    .filter(c => c._dist >= rMinKm)
+    .sort((a, b) => a._dist - b._dist);
+
   const seen = new Set();
   const perKind = new Map();
   const out = [];
-  for (const c of candidates) {
+  for (const c of withDist) {
     const key = c.name.toLowerCase();
     if (seen.has(key)) continue;
     const kindKey = c.kind.category + c.kind.emoji;
@@ -84,7 +92,7 @@ function buildSuggestions(candidates, origin) {
       emoji: c.kind.emoji,
       label: c.kind.label,
       coords: c.coords,
-      distKm: Math.round(haversineKm(origin, c.coords) * 10) / 10,
+      distKm: Math.round(c._dist * 10) / 10,
       place: c.place ? String(c.place).slice(0, 40) : null,
       website: c.website ? String(c.website).slice(0, 200) : null,
       description: c.description ? String(c.description).slice(0, 220) : null,
@@ -291,7 +299,7 @@ async function fetchOverpass(lat, lng, radius, errors) {
 }
 
 // ── Handler ─────────────────────────────────────────────────────────
-async function handle(request, latRaw, lngRaw, radiusRaw) {
+async function handle(request, latRaw, lngRaw, radiusRaw, rMinRaw) {
   const expectedPin = process.env.FAMILY_PIN;
   if (expectedPin) {
     const pin = request.headers.get('X-Family-Pin')
@@ -311,7 +319,9 @@ async function handle(request, latRaw, lngRaw, radiusRaw) {
   if (!isFinite(lat) || !isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
     return Response.json({ error: 'invalid_coords' }, { status: 400 });
   }
-  radius = Math.min(Math.max(radius, 2000), 35000); // 2–35 km
+  radius = Math.min(Math.max(radius, 2000), 50000); // 2–50 km
+  let rMinKm = Math.max(0, Number(rMinRaw) || 0) / 1000;
+  if (rMinKm * 1000 >= radius) rMinKm = 0;
 
   const errors = [];
 
@@ -321,7 +331,7 @@ async function handle(request, latRaw, lngRaw, radiusRaw) {
     try {
       const candidates = await fetchGeoapify(lat, lng, radius, apiKey);
       const suggestions = await translateDescriptions(
-        await enrichWithWikipedia(buildSuggestions(candidates, [lat, lng]))
+        await enrichWithWikipedia(buildSuggestions(candidates, [lat, lng], rMinKm))
       );
       return Response.json({ suggestions, source: 'geoapify' });
     } catch (err) {
@@ -334,7 +344,7 @@ async function handle(request, latRaw, lngRaw, radiusRaw) {
   const candidates = await fetchOverpass(lat, lng, radius, errors);
   if (candidates) {
     const suggestions = await translateDescriptions(
-      await enrichWithWikipedia(buildSuggestions(candidates, [lat, lng]))
+      await enrichWithWikipedia(buildSuggestions(candidates, [lat, lng], rMinKm))
     );
     return Response.json({ suggestions, source: 'overpass' });
   }
@@ -355,10 +365,10 @@ export async function POST(request) {
   } catch {
     return Response.json({ error: 'invalid_json' }, { status: 400 });
   }
-  return handle(request, body.lat, body.lng, body.radius);
+  return handle(request, body.lat, body.lng, body.rMax ?? body.radius, body.rMin);
 }
 
 export async function GET(request) {
   const p = new URL(request.url).searchParams;
-  return handle(request, p.get('lat'), p.get('lng'), p.get('radius'));
+  return handle(request, p.get('lat'), p.get('lng'), p.get('rmax') ?? p.get('radius'), p.get('rmin'));
 }

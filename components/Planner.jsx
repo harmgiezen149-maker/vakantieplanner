@@ -1706,10 +1706,20 @@ const ConfirmSheet = ({ title, message, confirmText, onConfirm, onClose }) => (
 
 // ============ OMGEVINGSSUGGESTIES ============
 
-const SuggestionsSheet = ({ stays, existingNames, onAdd, onClose }) => {
+const SuggestionsSheet = ({ stays, existingNames, existingCoords, onAdd, onClose }) => {
+  // Een suggestie geldt als "al toegevoegd" wanneer de naam overeenkomt
+  // óf wanneer hij binnen ~60 m van een bestaande activiteit ligt.
+  const isAlreadyAdded = (sugg) => {
+    if (existingNames.has(sugg.name.toLowerCase())) return true;
+    return (existingCoords || []).some(([la, ln]) =>
+      Math.abs(la - sugg.coords[0]) < 0.0006 && Math.abs(ln - sugg.coords[1]) < 0.0009
+    );
+  };
   const staysWithCoords = stays.filter(s => s.coords);
   const [stayId, setStayId] = useState(staysWithCoords[0]?.id ?? null);
-  const [radiusKm, setRadiusKm] = useState(20);
+  // Afstandsbanden: [van, tot] in km
+  const BANDS = [[0, 10], [10, 20], [20, 30], [30, 50]];
+  const [band, setBand] = useState(BANDS[0]);
   const [state, setState] = useState('idle'); // idle | loading | done | error
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(new Set());
@@ -1726,7 +1736,10 @@ const SuggestionsSheet = ({ stays, existingNames, onAdd, onClose }) => {
       const res = await fetch('/api/suggest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Family-Pin': getPin() },
-        body: JSON.stringify({ lat: stay.coords[0], lng: stay.coords[1], radius: radiusKm * 1000 }),
+        body: JSON.stringify({
+          lat: stay.coords[0], lng: stay.coords[1],
+          rMin: band[0] * 1000, rMax: band[1] * 1000,
+        }),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
@@ -1737,8 +1750,7 @@ const SuggestionsSheet = ({ stays, existingNames, onAdd, onClose }) => {
         throw new Error(`Suggesties ophalen mislukt (${detail}). Probeer het later opnieuw.`);
       }
       const data = await res.json();
-      const fresh = (data.suggestions || [])
-        .filter(s => !existingNames.has(s.name.toLowerCase()));
+      const fresh = (data.suggestions || []).filter(s => !isAlreadyAdded(s));
       setResults(fresh);
       // Standaard alles aangevinkt zou te veel zijn; start leeg
       setState('done');
@@ -1812,21 +1824,24 @@ const SuggestionsSheet = ({ stays, existingNames, onAdd, onClose }) => {
               ))}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-              <span style={{ fontSize: 13, color: COLORS.ink }}>Zoekstraal:</span>
-              {[10, 20, 30].map(km => (
-                <button
-                  key={km}
-                  onClick={() => setRadiusKm(km)}
-                  style={{
-                    padding: '6px 12px', borderRadius: 99, fontSize: 12, fontWeight: 600,
-                    fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
-                    background: radiusKm === km ? COLORS.forest : 'transparent',
-                    color: radiusKm === km ? COLORS.cream : COLORS.ink,
-                    border: `1px solid ${radiusKm === km ? COLORS.forest : COLORS.hairline}`,
-                  }}
-                >{km} km</button>
-              ))}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, color: COLORS.ink }}>Afstand:</span>
+              {BANDS.map(b => {
+                const active = band[0] === b[0] && band[1] === b[1];
+                return (
+                  <button
+                    key={b.join('-')}
+                    onClick={() => setBand(b)}
+                    style={{
+                      padding: '6px 12px', borderRadius: 99, fontSize: 12, fontWeight: 600,
+                      fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
+                      background: active ? COLORS.forest : 'transparent',
+                      color: active ? COLORS.cream : COLORS.ink,
+                      border: `1px solid ${active ? COLORS.forest : COLORS.hairline}`,
+                    }}
+                  >{b[0]}–{b[1]} km</button>
+                );
+              })}
             </div>
 
             <button
@@ -1857,8 +1872,8 @@ const SuggestionsSheet = ({ stays, existingNames, onAdd, onClose }) => {
 
             {state === 'done' && results.length === 0 && (
               <div style={{ fontSize: 13, color: COLORS.inkLight }}>
-                Niets nieuws gevonden binnen {radiusKm} km. Probeer een grotere
-                zoekstraal, of voeg zelf activiteiten toe.
+                Niets nieuws gevonden tussen {band[0]} en {band[1]} km. Probeer een
+                andere afstandsband, of voeg zelf activiteiten toe.
               </div>
             )}
 
@@ -2374,6 +2389,7 @@ export default function Planner({ authRequired }) {
         <SuggestionsSheet
           stays={stays}
           existingNames={new Set(allActivities.map(a => a.name.toLowerCase()))}
+          existingCoords={allActivities.filter(a => a.coords).map(a => a.coords)}
           onAdd={(picked) => {
             const ts = Date.now();
             setCustomActivities(cs => [
