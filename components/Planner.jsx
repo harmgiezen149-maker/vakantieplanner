@@ -1829,8 +1829,10 @@ const SuggestionsMap = ({ stay, results, selected, onToggle, onHide }) => {
       markersRef.current.push(m);
     }
 
-    // Suggestie-markers
-    results.forEach((r, idx) => {
+    // Suggestie-markers — r.idx is de originele index in de volledige
+    // resultatenlijst (nodig wanneer de kaart een gefilterde subset toont)
+    results.forEach((r, i) => {
+      const idx = r.idx ?? i;
       const cat = CATEGORIES[r.category] || CATEGORIES.custom;
       const isSel = selected.has(idx);
       const icon = L.divIcon({
@@ -1989,6 +1991,8 @@ const SuggestionsSheet = ({ stays, existingNames, existingCoords, exclusions, on
   const [band, setBand] = useState(BANDS[0]);
   const [state, setState] = useState('idle'); // idle | loading | done | error
   const [view, setView] = useState('list'); // list | map
+  // Categoriefilter: lege set = alles tonen
+  const [catFilter, setCatFilter] = useState(new Set());
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(new Set());
   const [errMsg, setErrMsg] = useState('');
@@ -2046,6 +2050,34 @@ const SuggestionsSheet = ({ stays, existingNames, existingCoords, exclusions, on
     });
     return out;
   }, [results]);
+
+  // Welke categorieën komen in de resultaten voor (met aantallen)
+  const catCounts = useMemo(() => {
+    const counts = {};
+    results.forEach(r => {
+      const cat = CATEGORIES[r.category] ? r.category : 'custom';
+      counts[cat] = (counts[cat] || 0) + 1;
+    });
+    return counts;
+  }, [results]);
+
+  const catVisible = (catKey) => catFilter.size === 0 || catFilter.has(catKey);
+
+  const toggleCat = (catKey) => {
+    setCatFilter(prev => {
+      const next = new Set(prev);
+      if (next.has(catKey)) next.delete(catKey); else next.add(catKey);
+      return next;
+    });
+  };
+
+  // Resultaten voor de kaart, gefilterd maar mét hun originele index
+  const mapResults = useMemo(() =>
+    results
+      .map((r, idx) => ({ ...r, idx }))
+      .filter(r => catVisible(CATEGORIES[r.category] ? r.category : 'custom')),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [results, catFilter]);
 
   const confirmAdd = () => {
     const picked = results.filter((_, idx) => selected.has(idx));
@@ -2148,6 +2180,44 @@ const SuggestionsSheet = ({ stays, existingNames, existingCoords, exclusions, on
 
             {results.length > 0 && (
               <>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                  {CATEGORY_ORDER.filter(k => catCounts[k]).map(catKey => {
+                    const cat = CATEGORIES[catKey];
+                    const active = catFilter.has(catKey);
+                    return (
+                      <button
+                        key={catKey}
+                        onClick={() => toggleCat(catKey)}
+                        style={{
+                          padding: '5px 10px', borderRadius: 99,
+                          fontSize: 12, fontWeight: 600,
+                          fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
+                          background: active ? cat.color : 'transparent',
+                          color: active ? COLORS.cream : COLORS.ink,
+                          border: `1px solid ${active ? cat.color : COLORS.hairline}`,
+                          display: 'flex', alignItems: 'center', gap: 5,
+                        }}
+                      >
+                        <span>{cat.emoji}</span>
+                        {cat.name}
+                        <span style={{ opacity: 0.7, fontWeight: 500 }}>{catCounts[catKey]}</span>
+                      </button>
+                    );
+                  })}
+                  {catFilter.size > 0 && (
+                    <button
+                      onClick={() => setCatFilter(new Set())}
+                      style={{
+                        padding: '5px 10px', borderRadius: 99,
+                        fontSize: 12, fontWeight: 600,
+                        fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
+                        background: 'transparent', color: COLORS.inkLight,
+                        border: 'none', textDecoration: 'underline',
+                      }}
+                    >wis filter</button>
+                  )}
+                </div>
+
                 <div style={{
                   display: 'flex', gap: 0, marginBottom: 14,
                   border: `1px solid ${COLORS.hairline}`, borderRadius: 10,
@@ -2170,7 +2240,7 @@ const SuggestionsSheet = ({ stays, existingNames, existingCoords, exclusions, on
                 {view === 'map' && (
                   <SuggestionsMap
                     stay={stay}
-                    results={results}
+                    results={mapResults}
                     selected={selected}
                     onToggle={toggle}
                     onHide={hideResult}
@@ -2179,7 +2249,7 @@ const SuggestionsSheet = ({ stays, existingNames, existingCoords, exclusions, on
 
                 {view === 'list' && CATEGORY_ORDER.map(catKey => {
                   const list = grouped[catKey];
-                  if (!list || list.length === 0) return null;
+                  if (!list || list.length === 0 || !catVisible(catKey)) return null;
                   const cat = CATEGORIES[catKey];
                   return (
                     <div key={catKey} style={{ marginBottom: 18 }}>
