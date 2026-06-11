@@ -85,6 +85,9 @@ function buildSuggestions(candidates, origin) {
       label: c.kind.label,
       coords: c.coords,
       distKm: Math.round(haversineKm(origin, c.coords) * 10) / 10,
+      place: c.place ? String(c.place).slice(0, 40) : null,
+      website: c.website ? String(c.website).slice(0, 200) : null,
+      description: c.description ? String(c.description).slice(0, 140) : null,
     });
   }
   out.sort((a, b) => a.distKm - b.distKm);
@@ -124,7 +127,13 @@ async function fetchGeoapify(lat, lng, radius, apiKey) {
     const cLat = p.lat ?? f.geometry?.coordinates?.[1];
     const cLng = p.lon ?? f.geometry?.coordinates?.[0];
     if (cLat == null || cLng == null) continue;
-    candidates.push({ name, coords: [cLat, cLng], kind });
+    const raw = p.datasource?.raw || {};
+    candidates.push({
+      name, coords: [cLat, cLng], kind,
+      place: p.city || p.village || p.town || p.address_line2 || null,
+      website: p.website || raw.website || raw['contact:website'] || null,
+      description: raw['description:nl'] || raw.description || null,
+    });
   }
   return candidates;
 }
@@ -192,7 +201,12 @@ async function fetchOverpass(lat, lng, radius, errors) {
         const cLat = el.lat ?? el.center?.lat;
         const cLng = el.lon ?? el.center?.lon;
         if (cLat == null || cLng == null) continue;
-        candidates.push({ name, coords: [cLat, cLng], kind });
+        candidates.push({
+          name, coords: [cLat, cLng], kind,
+          place: tags['addr:city'] || tags['addr:village'] || null,
+          website: tags.website || tags['contact:website'] || null,
+          description: tags['description:nl'] || tags.description || null,
+        });
       }
       return candidates;
     } catch (err) {

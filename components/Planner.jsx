@@ -5,7 +5,7 @@ import Link from 'next/link';
 import {
   Plus, X, Trash2, Sparkles, Calendar as CalendarIcon,
   ChevronRight, RefreshCw, User, Wifi, WifiOff, Check, AlertCircle, Lock, MapPin, Map as MapIcon,
-  Pencil, Search, Loader2, Car, ChevronUp, ChevronDown, CheckSquare, Backpack,
+  Pencil, Search, Loader2, Car, ChevronUp, ChevronDown, CheckSquare, Backpack, ExternalLink,
   Settings, Home, CalendarRange, Compass,
 } from 'lucide-react';
 import {
@@ -1773,7 +1773,8 @@ const SuggestionsSheet = ({ stays, existingNames, onAdd, onClose }) => {
       category: p.category,
       emoji: p.emoji,
       coords: p.coords,
-      note: `${p.label ? p.label + ' · ' : ''}≈ ${p.distKm} km van ${stay?.name ?? 'verblijf'}`,
+      note: [p.label, p.place, `≈ ${p.distKm} km van ${stay?.name ?? 'verblijf'}`]
+        .filter(Boolean).join(' · '),
     })));
   };
 
@@ -1879,11 +1880,11 @@ const SuggestionsSheet = ({ stays, existingNames, onAdd, onClose }) => {
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {list.map(r => (
-                          <button
+                          <div
                             key={r.idx}
                             onClick={() => toggle(r.idx)}
                             style={{
-                              display: 'flex', alignItems: 'center', gap: 10,
+                              display: 'flex', alignItems: 'flex-start', gap: 10,
                               padding: '10px 12px', width: '100%', textAlign: 'left',
                               background: selected.has(r.idx) ? `${cat.color}1A` : COLORS.creamSoft,
                               border: `1px solid ${selected.has(r.idx) ? cat.color : 'transparent'}`,
@@ -1892,28 +1893,67 @@ const SuggestionsSheet = ({ stays, existingNames, onAdd, onClose }) => {
                             }}
                           >
                             <span style={{
-                              width: 18, height: 18, borderRadius: 5, flexShrink: 0,
+                              width: 18, height: 18, borderRadius: 5, flexShrink: 0, marginTop: 2,
                               border: `2px solid ${selected.has(r.idx) ? cat.color : COLORS.hairline}`,
                               background: selected.has(r.idx) ? cat.color : 'transparent',
                               display: 'flex', alignItems: 'center', justifyContent: 'center',
                             }}>
                               {selected.has(r.idx) && <Check size={12} color={COLORS.cream} />}
                             </span>
-                            <span style={{ fontSize: 14 }}>{r.emoji}</span>
+                            <span style={{ fontSize: 14, marginTop: 1 }}>{r.emoji}</span>
                             <span style={{ flex: 1, minWidth: 0 }}>
                               <span style={{ display: 'block', fontSize: 13, color: COLORS.charcoal, fontWeight: 500 }}>
                                 {r.name}
                               </span>
-                              {r.label && (
-                                <span style={{ display: 'block', fontSize: 10, color: COLORS.inkLight, marginTop: 1 }}>
-                                  {r.label}
+                              <span style={{ display: 'block', fontSize: 10, color: COLORS.inkLight, marginTop: 1 }}>
+                                {[r.label, r.place].filter(Boolean).join(' · ')}
+                              </span>
+                              {r.description && (
+                                <span style={{
+                                  display: 'block', fontSize: 11, color: COLORS.ink,
+                                  marginTop: 3, lineHeight: 1.4, fontStyle: 'italic',
+                                }}>
+                                  {r.description}
                                 </span>
                               )}
                             </span>
-                            <span style={{ fontSize: 11, color: COLORS.inkLight, whiteSpace: 'nowrap' }}>
-                              {r.distKm} km
+                            <span style={{
+                              display: 'flex', flexDirection: 'column',
+                              alignItems: 'flex-end', gap: 4, flexShrink: 0,
+                            }}>
+                              <span style={{ fontSize: 11, color: COLORS.inkLight, whiteSpace: 'nowrap' }}>
+                                {r.distKm} km
+                              </span>
+                              <span style={{ display: 'flex', gap: 6 }}>
+                                <a
+                                  href={`https://www.google.com/maps/search/?api=1&query=${r.coords[0]},${r.coords[1]}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  title="Open in Google Maps"
+                                  aria-label="Open in Google Maps"
+                                  style={{
+                                    color: cat.color, display: 'flex',
+                                    alignItems: 'center', padding: 2,
+                                  }}
+                                ><MapPin size={14} /></a>
+                                {r.website && (
+                                  <a
+                                    href={r.website}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    title="Website"
+                                    aria-label="Website"
+                                    style={{
+                                      color: cat.color, display: 'flex',
+                                      alignItems: 'center', padding: 2,
+                                    }}
+                                  ><ExternalLink size={13} /></a>
+                                )}
+                              </span>
                             </span>
-                          </button>
+                          </div>
                         ))}
                       </div>
                     </div>
