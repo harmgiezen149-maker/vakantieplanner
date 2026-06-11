@@ -1706,6 +1706,179 @@ const ConfirmSheet = ({ title, message, confirmText, onConfirm, onClose }) => (
 
 // ============ OMGEVINGSSUGGESTIES ============
 
+// Kaartweergave van zoekresultaten. Markers per categorie (kleur + emoji),
+// hover/klik toont popup met info en een selecteer-knop.
+const SuggestionsMap = ({ stay, results, selected, onToggle }) => {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const leafletRef = useRef(null);
+  const markersRef = useRef([]);
+  const [ready, setReady] = useState(false);
+
+  // Refs zodat de popup-handler altijd de actuele state ziet
+  const onToggleRef = useRef(onToggle);
+  onToggleRef.current = onToggle;
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+
+  // Leaflet laden + kaart initialiseren
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!document.querySelector('link[data-leaflet]')) {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+        link.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
+        link.crossOrigin = '';
+        link.setAttribute('data-leaflet', '1');
+        document.head.appendChild(link);
+      }
+      const L = await import('leaflet');
+      if (!mounted) return;
+      leafletRef.current = L;
+
+      if (!mapRef.current && containerRef.current) {
+        const map = L.map(containerRef.current, {
+          center: stay?.coords || [48.8, 6.5],
+          zoom: 10,
+          scrollWheelZoom: true,
+        });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© OpenStreetMap contributors',
+          maxZoom: 19,
+        }).addTo(map);
+
+        // Selecteer-knop in popups koppelen
+        map.on('popupopen', (e) => {
+          const btn = e.popup.getElement()?.querySelector('[data-sugg-idx]');
+          if (btn) {
+            btn.onclick = () => {
+              onToggleRef.current(Number(btn.dataset.suggIdx));
+              map.closePopup();
+            };
+          }
+        });
+
+        mapRef.current = map;
+        setReady(true);
+        // Sheet-animatie kan de containermaat beïnvloeden — herbereken
+        setTimeout(() => map.invalidateSize(), 320);
+      }
+    })();
+    return () => {
+      mounted = false;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Markers tekenen
+  useEffect(() => {
+    const map = mapRef.current;
+    const L = leafletRef.current;
+    if (!map || !L || !ready) return;
+
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current = [];
+
+    // Verblijf-marker
+    if (stay?.coords) {
+      const stayIcon = L.divIcon({
+        className: '',
+        html: `<div style="
+          width: 34px; height: 34px; border-radius: 50%;
+          background: ${stay.color}; border: 3px solid #FAF3E1;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 16px; box-shadow: 0 2px 8px rgba(31,41,34,0.35);
+        ">🏡</div>`,
+        iconSize: [34, 34], iconAnchor: [17, 17],
+      });
+      const m = L.marker(stay.coords, { icon: stayIcon, zIndexOffset: 1000 }).addTo(map);
+      m.bindPopup(`<div style="font-family:'DM Sans',sans-serif;">
+        <div style="font-family:'Fraunces',serif;font-size:14px;color:#2D4F3E;">${stay.name}</div>
+      </div>`);
+      markersRef.current.push(m);
+    }
+
+    // Suggestie-markers
+    results.forEach((r, idx) => {
+      const cat = CATEGORIES[r.category] || CATEGORIES.custom;
+      const isSel = selected.has(idx);
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="
+          width: 30px; height: 30px; border-radius: 50%;
+          background: ${cat.color};
+          border: ${isSel ? '3px solid #2D4F3E' : '2px solid rgba(250,243,225,0.9)'};
+          display: flex; align-items: center; justify-content: center;
+          font-size: 14px; box-shadow: 0 2px 6px rgba(31,41,34,0.3);
+          position: relative;
+        ">${r.emoji}${isSel ? `<span style="
+          position: absolute; top: -5px; right: -5px;
+          width: 15px; height: 15px; border-radius: 50%;
+          background: #2D4F3E; color: #FAF3E1;
+          font-size: 10px; line-height: 15px; text-align: center;
+          font-weight: 700;
+        ">✓</span>` : ''}</div>`,
+        iconSize: [30, 30], iconAnchor: [15, 15],
+      });
+
+      const m = L.marker(r.coords, { icon }).addTo(map);
+
+      const sub = [r.label, r.place, `${r.distKm} km`].filter(Boolean).join(' · ');
+      const desc = r.description
+        ? `<div style="font-size:11px;color:#1F2922;font-style:italic;margin-top:5px;line-height:1.45;">${r.description}</div>`
+        : '';
+      const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${r.coords[0]},${r.coords[1]}`;
+      m.bindPopup(`
+        <div style="font-family:'DM Sans',sans-serif;min-width:180px;max-width:230px;">
+          <div style="font-size:13px;font-weight:600;color:#1F2922;">${r.emoji} ${r.name}</div>
+          <div style="font-size:10px;color:rgba(31,41,34,0.55);margin-top:2px;">${sub}</div>
+          ${desc}
+          <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
+            <button data-sugg-idx="${idx}" style="
+              flex:1; padding:7px 10px; border:none; border-radius:8px;
+              font-family:'DM Sans',sans-serif; font-size:12px; font-weight:600;
+              cursor:pointer;
+              background:${isSel ? '#E8E0CC' : '#2D4F3E'};
+              color:${isSel ? '#1F2922' : '#FAF3E1'};
+            ">${isSel ? '✓ Geselecteerd — weghalen' : '+ Selecteren'}</button>
+            <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" style="
+              font-size:11px; color:${cat.color}; text-decoration:none; font-weight:600;
+              white-space:nowrap;
+            ">Maps ↗</a>
+          </div>
+        </div>
+      `, { closeButton: false });
+
+      m.on('mouseover', () => m.openPopup());
+      markersRef.current.push(m);
+    });
+
+    // Inzoomen op de resultaten
+    if (results.length > 0) {
+      const pts = results.map(r => r.coords);
+      if (stay?.coords) pts.push(stay.coords);
+      map.fitBounds(L.latLngBounds(pts), { padding: [30, 30], maxZoom: 13 });
+    }
+  }, [results, selected, stay, ready]);
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        width: '100%', height: 380, borderRadius: 12,
+        overflow: 'hidden', border: `1px solid ${COLORS.hairline}`,
+        marginBottom: 14, zIndex: 0, position: 'relative',
+      }}
+    />
+  );
+};
+
 const SuggestionsSheet = ({ stays, existingNames, existingCoords, onAdd, onClose }) => {
   // Een suggestie geldt als "al toegevoegd" wanneer de naam overeenkomt
   // óf wanneer hij binnen ~60 m van een bestaande activiteit ligt.
@@ -1721,6 +1894,7 @@ const SuggestionsSheet = ({ stays, existingNames, existingCoords, onAdd, onClose
   const BANDS = [[0, 10], [10, 20], [20, 30], [30, 50]];
   const [band, setBand] = useState(BANDS[0]);
   const [state, setState] = useState('idle'); // idle | loading | done | error
+  const [view, setView] = useState('list'); // list | map
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(new Set());
   const [errMsg, setErrMsg] = useState('');
@@ -1879,7 +2053,35 @@ const SuggestionsSheet = ({ stays, existingNames, existingCoords, onAdd, onClose
 
             {results.length > 0 && (
               <>
-                {CATEGORY_ORDER.map(catKey => {
+                <div style={{
+                  display: 'flex', gap: 0, marginBottom: 14,
+                  border: `1px solid ${COLORS.hairline}`, borderRadius: 10,
+                  overflow: 'hidden',
+                }}>
+                  {[['list', 'Lijst'], ['map', 'Kaart']].map(([key, lbl]) => (
+                    <button
+                      key={key}
+                      onClick={() => setView(key)}
+                      style={{
+                        flex: 1, padding: '9px 0', border: 'none', cursor: 'pointer',
+                        fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600,
+                        background: view === key ? COLORS.forest : 'transparent',
+                        color: view === key ? COLORS.cream : COLORS.ink,
+                      }}
+                    >{lbl}</button>
+                  ))}
+                </div>
+
+                {view === 'map' && (
+                  <SuggestionsMap
+                    stay={stay}
+                    results={results}
+                    selected={selected}
+                    onToggle={toggle}
+                  />
+                )}
+
+                {view === 'list' && CATEGORY_ORDER.map(catKey => {
                   const list = grouped[catKey];
                   if (!list || list.length === 0) return null;
                   const cat = CATEGORIES[catKey];
