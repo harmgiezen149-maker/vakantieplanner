@@ -131,6 +131,39 @@ async function enrichWithWikipedia(suggestions) {
   return suggestions;
 }
 
+// ── Vertaling naar het Nederlands ───────────────────────────────────
+// Omschrijvingen komen uit Wikipedia/OSM en zijn meestal in de lokale taal
+// (Frans, Duits…). We vertalen ze via het publieke Google Translate
+// endpoint. Nederlandse tekst komt ongewijzigd terug (sl=auto).
+async function translateToDutch(text) {
+  const url = 'https://translate.googleapis.com/translate_a/single' +
+    '?client=gtx&sl=auto&tl=nl&dt=t&q=' + encodeURIComponent(text);
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'VakantiePlanner/1.0 (familie-vakantieplanner)' },
+    signal: AbortSignal.timeout(6_000),
+  });
+  if (!res.ok) throw new Error(`translate_${res.status}`);
+  const data = await res.json();
+  return (data?.[0] || []).map(seg => seg?.[0] || '').join('').trim();
+}
+
+async function translateDescriptions(suggestions) {
+  const targets = suggestions.filter(s => s.description).slice(0, 25);
+  await Promise.allSettled(targets.map(async (s) => {
+    try {
+      const nl = await translateToDutch(s.description);
+      if (nl) {
+        s.description = nl.length > 240
+          ? nl.slice(0, 240).replace(/\s+\S*$/, '') + '…'
+          : nl;
+      }
+    } catch {
+      // vertaling mislukt → originele tekst behouden
+    }
+  }));
+  return suggestions;
+}
+
 // ── Bron 1: Geoapify Places ─────────────────────────────────────────
 const GEOAPIFY_CATEGORIES = [
   'commercial.supermarket',
@@ -287,7 +320,9 @@ async function handle(request, latRaw, lngRaw, radiusRaw) {
   if (apiKey) {
     try {
       const candidates = await fetchGeoapify(lat, lng, radius, apiKey);
-      const suggestions = await enrichWithWikipedia(buildSuggestions(candidates, [lat, lng]));
+      const suggestions = await translateDescriptions(
+        await enrichWithWikipedia(buildSuggestions(candidates, [lat, lng]))
+      );
       return Response.json({ suggestions, source: 'geoapify' });
     } catch (err) {
       errors.push(`geoapify: ${String(err?.message ?? err)}`);
@@ -298,7 +333,9 @@ async function handle(request, latRaw, lngRaw, radiusRaw) {
   // 2. Overpass (reserve; publieke servers weigeren Vercel-IP's regelmatig)
   const candidates = await fetchOverpass(lat, lng, radius, errors);
   if (candidates) {
-    const suggestions = await enrichWithWikipedia(buildSuggestions(candidates, [lat, lng]));
+    const suggestions = await translateDescriptions(
+      await enrichWithWikipedia(buildSuggestions(candidates, [lat, lng]))
+    );
     return Response.json({ suggestions, source: 'overpass' });
   }
 

@@ -910,6 +910,7 @@ const Sheet = ({ children, onClose, title }) => (
     />
     <div style={{
       position: 'fixed', bottom: 0, left: 0, right: 0,
+      width: '100%', maxWidth: 720, margin: '0 auto',
       background: COLORS.cream, borderRadius: '20px 20px 0 0',
       maxHeight: '85vh', overflowY: 'auto', zIndex: 51,
       animation: 'slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
