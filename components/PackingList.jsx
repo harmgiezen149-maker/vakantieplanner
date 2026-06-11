@@ -131,6 +131,107 @@ export default function PackingList() {
   };
 
   // ── Item-acties ────────────────────────────────────────────────────
+  // ── Excel-import ──────────────────────────────────────────────────
+  const importInputRef = useRef(null);
+  const [importing, setImporting] = useState(false);
+
+  const handleImportFile = async (file) => {
+    if (!file) return;
+    setImporting(true);
+    try {
+      const XLSX = await import('xlsx');
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+      // Kolomherkenning: zoek een kopregel met herkenbare woorden.
+      // Zonder kopregel: kolom A = categorie, B = item, C = aantal.
+      const norm = (v) => String(v ?? '').trim();
+      const lower = (v) => norm(v).toLowerCase();
+      let colCat = 0, colItem = 1, colQty = 2, startRow = 0;
+      const headerRow = rows.findIndex(r => r.some(c => {
+        const v = lower(c);
+        return ['categorie', 'category', 'item', 'naam', 'artikel', 'omschrijving', 'aantal', 'qty', 'quantity'].includes(v);
+      }));
+      if (headerRow !== -1) {
+        const hdr = rows[headerRow].map(lower);
+        const find = (names) => hdr.findIndex(h => names.includes(h));
+        const c = find(['categorie', 'category', 'rubriek']);
+        const i = find(['item', 'naam', 'artikel', 'omschrijving', 'wat']);
+        const q = find(['aantal', 'qty', 'quantity', 'aant', 'stuks']);
+        if (i !== -1) {
+          colItem = i;
+          colCat = c; // -1 = geen categoriekolom
+          colQty = q;
+          startRow = headerRow + 1;
+        }
+      }
+
+      // Rijen verwerken. Lege categoriecel = vorige categorie (zoals bij
+      // samengevoegde cellen in Excel). Geen categorie = "Algemeen".
+      const parsed = []; // { catName, label, qty }
+      let lastCat = '';
+      for (let r = startRow; r < rows.length; r++) {
+        const row = rows[r] || [];
+        const label = norm(row[colItem]);
+        const catCell = colCat >= 0 ? norm(row[colCat]) : '';
+        if (catCell) lastCat = catCell;
+        if (!label) continue;
+        const qtyRaw = colQty >= 0 ? row[colQty] : '';
+        const qty = Math.max(1, parseInt(qtyRaw, 10) || 1);
+        parsed.push({ catName: lastCat || 'Algemeen', label: label.slice(0, 80), qty });
+      }
+
+      if (parsed.length === 0) {
+        window.alert('Geen items gevonden in dit bestand. Verwacht formaat: kolommen Categorie | Item | Aantal (kopregel optioneel).');
+        return;
+      }
+
+      // Samenvoegen met bestaande lijst: categorieën op naam matchen,
+      // dubbele items (zelfde naam binnen de categorie) overslaan.
+      const nextCats = [...categories];
+      const nextItems = [...items];
+      const catByName = new Map(nextCats.map(c => [c.name.toLowerCase(), c]));
+      let added = 0, skipped = 0, newCats = 0;
+
+      for (const p of parsed) {
+        let cat = catByName.get(p.catName.toLowerCase());
+        if (!cat) {
+          cat = { id: uid(), name: p.catName.slice(0, 40) };
+          nextCats.push(cat);
+          catByName.set(p.catName.toLowerCase(), cat);
+          newCats++;
+        }
+        const dup = nextItems.some(it =>
+          it.categoryId === cat.id && it.label.toLowerCase() === p.label.toLowerCase()
+        );
+        if (dup) { skipped++; continue; }
+        nextItems.push({ id: uid(), categoryId: cat.id, label: p.label, qty: p.qty, checked: false });
+        added++;
+      }
+
+      const summary = [
+        `${added} item${added === 1 ? '' : 's'} toevoegen`,
+        newCats > 0 ? `${newCats} nieuwe categorie${newCats === 1 ? '' : 'ën'}` : null,
+        skipped > 0 ? `${skipped} al aanwezig (overgeslagen)` : null,
+      ].filter(Boolean).join(', ');
+
+      if (added === 0) {
+        window.alert(`Niets toe te voegen — ${summary}.`);
+        return;
+      }
+      if (window.confirm(`${summary}. Doorgaan?`)) {
+        apply(nextCats, nextItems);
+      }
+    } catch (e) {
+      window.alert('Bestand kon niet worden gelezen: ' + (e?.message || e));
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) importInputRef.current.value = '';
+    }
+  };
+
   const addItem = (catId) => {
     const draft = draftItem[catId] || {};
     const label = (draft.label || '').trim();
@@ -187,18 +288,34 @@ export default function PackingList() {
           gedeeld — iedereen vinkt af wat ingepakt is.
         </p>
 
-        {done > 0 && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            style={{ display: 'none' }}
+            onChange={(e) => handleImportFile(e.target.files?.[0])}
+          />
           <button
-            onClick={() => {
-              if (window.confirm('Alle vinkjes uitzetten? Je categorieën en items blijven staan — handig bij een nieuwe vakantie.')) {
-                apply(categories, items.map((it) => ({ ...it, checked: false })));
-              }
-            }}
-            style={S.resetBtn}
+            onClick={() => importInputRef.current?.click()}
+            disabled={importing}
+            style={{ ...S.resetBtn, marginBottom: 0, opacity: importing ? 0.6 : 1 }}
           >
-            ↺ Alle vinkjes resetten
+            {importing ? 'Bezig met lezen…' : '📥 Importeren uit Excel'}
           </button>
-        )}
+          {done > 0 && (
+            <button
+              onClick={() => {
+                if (window.confirm('Alle vinkjes uitzetten? Je categorieën en items blijven staan — handig bij een nieuwe vakantie.')) {
+                  apply(categories, items.map((it) => ({ ...it, checked: false })));
+                }
+              }}
+              style={{ ...S.resetBtn, marginBottom: 0 }}
+            >
+              ↺ Alle vinkjes resetten
+            </button>
+          )}
+        </div>
 
         <div style={S.progressWrap}>
           <div style={S.progressTrack}>
