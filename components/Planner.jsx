@@ -1708,11 +1708,12 @@ const ConfirmSheet = ({ title, message, confirmText, onConfirm, onClose }) => (
 
 // Kaartweergave van zoekresultaten. Markers per categorie (kleur + emoji),
 // hover/klik toont popup met info en een selecteer-knop.
-const SuggestionsMap = ({ stay, results, selected, onToggle, onHide }) => {
+const SuggestionsMap = ({ stay, results, selected, onToggle, onHide, topBar }) => {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const leafletRef = useRef(null);
-  const markersRef = useRef([]);
+  // idx (origineel) → { marker, result }
+  const markerMapRef = useRef(new Map());
   const [ready, setReady] = useState(false);
   const [full, setFull] = useState(false);
 
@@ -1730,17 +1731,109 @@ const SuggestionsMap = ({ stay, results, selected, onToggle, onHide }) => {
     return () => window.removeEventListener('keydown', onKey);
   }, [full]);
 
-  // Refs zodat de popup-handler altijd de actuele state ziet
+  // Refs zodat handlers altijd de actuele props zien
   const onToggleRef = useRef(onToggle);
   onToggleRef.current = onToggle;
   const onHideRef = useRef(onHide);
   onHideRef.current = onHide;
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  const resultsRef = useRef(results);
+  resultsRef.current = results;
 
-  // Leaflet laden + kaart initialiseren
+  const markerIcon = (L, r, isSel) => {
+    const cat = CATEGORIES[r.category] || CATEGORIES.custom;
+    return L.divIcon({
+      className: '',
+      html: `<div style="
+        width: 30px; height: 30px; border-radius: 50%;
+        background: ${cat.color};
+        border: ${isSel ? '3px solid #2D4F3E' : '2px solid rgba(250,243,225,0.9)'};
+        display: flex; align-items: center; justify-content: center;
+        font-size: 14px; box-shadow: 0 2px 6px rgba(31,41,34,0.3);
+        position: relative;
+      ">${r.emoji}${isSel ? `<span style="
+        position: absolute; top: -5px; right: -5px;
+        width: 15px; height: 15px; border-radius: 50%;
+        background: #2D4F3E; color: #FAF3E1;
+        font-size: 10px; line-height: 15px; text-align: center;
+        font-weight: 700;
+      ">✓</span>` : ''}</div>`,
+      iconSize: [30, 30], iconAnchor: [15, 15],
+    });
+  };
+
+  const popupHtml = (r, idx, isSel) => {
+    const cat = CATEGORIES[r.category] || CATEGORIES.custom;
+    const sub = [r.label, r.place, `${r.distKm} km`].filter(Boolean).join(' · ');
+    const img = r.image
+      ? `<img src="${r.image}" loading="lazy" alt="" style="
+          width:100%; height:96px; object-fit:cover;
+          border-radius:8px; margin-top:6px; display:block;
+        " onerror="this.style.display='none'" />`
+      : '';
+    const desc = r.description
+      ? `<div style="font-size:11px;color:#1F2922;font-style:italic;margin-top:5px;line-height:1.45;">${r.description}</div>`
+      : '';
+    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${r.coords[0]},${r.coords[1]}`;
+    const websiteLink = r.website
+      ? `<a href="${r.website}" target="_blank" rel="noopener noreferrer" style="
+          font-size:11px; color:${cat.color}; text-decoration:none; font-weight:600;
+          white-space:nowrap;
+        ">Website ↗</a>`
+      : '';
+    return `
+      <div style="font-family:'DM Sans',sans-serif;min-width:190px;max-width:240px;">
+        <div style="font-size:13px;font-weight:600;color:#1F2922;">${r.emoji} ${r.name}</div>
+        <div style="font-size:10px;color:rgba(31,41,34,0.55);margin-top:2px;">${sub}</div>
+        ${img}
+        ${desc}
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
+          <button data-sugg-idx="${idx}" style="
+            flex:1; padding:7px 10px; border:none; border-radius:8px;
+            font-family:'DM Sans',sans-serif; font-size:12px; font-weight:600;
+            cursor:pointer;
+            background:${isSel ? '#E8E0CC' : '#2D4F3E'};
+            color:${isSel ? '#1F2922' : '#FAF3E1'};
+          ">${isSel ? '✓ Geselecteerd — weghalen' : '+ Selecteren'}</button>
+          <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" style="
+            font-size:11px; color:${cat.color}; text-decoration:none; font-weight:600;
+            white-space:nowrap;
+          ">Maps ↗</a>
+          ${websiteLink}
+        </div>
+        <button data-sugg-hide="${idx}" style="
+          width:100%; margin-top:6px; padding:5px 8px;
+          border:none; background:transparent; cursor:pointer;
+          font-family:'DM Sans',sans-serif; font-size:10.5px;
+          color:rgba(31,41,34,0.5); text-decoration:underline;
+        ">Niet meer tonen in suggesties</button>
+      </div>`;
+  };
+
+  // Leaflet laden + kaart initialiseren + gedelegeerde knop-handler.
+  // Delegatie op containerniveau overleeft het vervangen van popup-inhoud,
+  // dus de knoppen blijven áltijd werken.
   useEffect(() => {
     let mounted = true;
+    const container = containerRef.current;
+
+    const onContainerClick = (e) => {
+      const selBtn = e.target.closest('[data-sugg-idx]');
+      if (selBtn) {
+        e.preventDefault();
+        onToggleRef.current(Number(selBtn.dataset.suggIdx));
+        return;
+      }
+      const hideBtn = e.target.closest('[data-sugg-hide]');
+      if (hideBtn) {
+        e.preventDefault();
+        mapRef.current?.closePopup();
+        onHideRef.current(Number(hideBtn.dataset.suggHide));
+      }
+    };
+    container?.addEventListener('click', onContainerClick);
+
     (async () => {
       if (!document.querySelector('link[data-leaflet]')) {
         const link = document.createElement('link');
@@ -1765,34 +1858,16 @@ const SuggestionsMap = ({ stay, results, selected, onToggle, onHide }) => {
           attribution: '© OpenStreetMap contributors',
           maxZoom: 19,
         }).addTo(map);
-
-        // Selecteer-knop in popups koppelen
-        map.on('popupopen', (e) => {
-          const el = e.popup.getElement();
-          const btn = el?.querySelector('[data-sugg-idx]');
-          if (btn) {
-            btn.onclick = () => {
-              onToggleRef.current(Number(btn.dataset.suggIdx));
-              map.closePopup();
-            };
-          }
-          const hideBtn = el?.querySelector('[data-sugg-hide]');
-          if (hideBtn) {
-            hideBtn.onclick = () => {
-              onHideRef.current(Number(hideBtn.dataset.suggHide));
-              map.closePopup();
-            };
-          }
-        });
-
         mapRef.current = map;
         setReady(true);
         // Sheet-animatie kan de containermaat beïnvloeden — herbereken
         setTimeout(() => map.invalidateSize(), 320);
       }
     })();
+
     return () => {
       mounted = false;
+      container?.removeEventListener('click', onContainerClick);
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
@@ -1801,14 +1876,16 @@ const SuggestionsMap = ({ stay, results, selected, onToggle, onHide }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Markers tekenen
+  // Markers (her)tekenen wanneer de resultaten of het verblijf wijzigen.
+  // Selectie-wijzigingen vallen hier bewust búíten: die passen alleen
+  // icoon en popup-inhoud aan, zodat een open popup open blijft.
   useEffect(() => {
     const map = mapRef.current;
     const L = leafletRef.current;
     if (!map || !L || !ready) return;
 
-    markersRef.current.forEach(m => m.remove());
-    markersRef.current = [];
+    markerMapRef.current.forEach(({ marker }) => marker.remove());
+    markerMapRef.current = new Map();
 
     // Verblijf-marker
     if (stay?.coords) {
@@ -1826,76 +1903,20 @@ const SuggestionsMap = ({ stay, results, selected, onToggle, onHide }) => {
       m.bindPopup(`<div style="font-family:'DM Sans',sans-serif;">
         <div style="font-family:'Fraunces',serif;font-size:14px;color:#2D4F3E;">${stay.name}</div>
       </div>`);
-      markersRef.current.push(m);
+      markerMapRef.current.set('__stay__', { marker: m, result: null });
     }
 
     // Suggestie-markers — r.idx is de originele index in de volledige
     // resultatenlijst (nodig wanneer de kaart een gefilterde subset toont)
     results.forEach((r, i) => {
       const idx = r.idx ?? i;
-      const cat = CATEGORIES[r.category] || CATEGORIES.custom;
-      const isSel = selected.has(idx);
-      const icon = L.divIcon({
-        className: '',
-        html: `<div style="
-          width: 30px; height: 30px; border-radius: 50%;
-          background: ${cat.color};
-          border: ${isSel ? '3px solid #2D4F3E' : '2px solid rgba(250,243,225,0.9)'};
-          display: flex; align-items: center; justify-content: center;
-          font-size: 14px; box-shadow: 0 2px 6px rgba(31,41,34,0.3);
-          position: relative;
-        ">${r.emoji}${isSel ? `<span style="
-          position: absolute; top: -5px; right: -5px;
-          width: 15px; height: 15px; border-radius: 50%;
-          background: #2D4F3E; color: #FAF3E1;
-          font-size: 10px; line-height: 15px; text-align: center;
-          font-weight: 700;
-        ">✓</span>` : ''}</div>`,
-        iconSize: [30, 30], iconAnchor: [15, 15],
-      });
-
-      const m = L.marker(r.coords, { icon }).addTo(map);
-
-      const sub = [r.label, r.place, `${r.distKm} km`].filter(Boolean).join(' · ');
-      const desc = r.description
-        ? `<div style="font-size:11px;color:#1F2922;font-style:italic;margin-top:5px;line-height:1.45;">${r.description}</div>`
-        : '';
-      const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${r.coords[0]},${r.coords[1]}`;
-      m.bindPopup(`
-        <div style="font-family:'DM Sans',sans-serif;min-width:180px;max-width:230px;">
-          <div style="font-size:13px;font-weight:600;color:#1F2922;">${r.emoji} ${r.name}</div>
-          <div style="font-size:10px;color:rgba(31,41,34,0.55);margin-top:2px;">${sub}</div>
-          ${desc}
-          <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
-            <button data-sugg-idx="${idx}" style="
-              flex:1; padding:7px 10px; border:none; border-radius:8px;
-              font-family:'DM Sans',sans-serif; font-size:12px; font-weight:600;
-              cursor:pointer;
-              background:${isSel ? '#E8E0CC' : '#2D4F3E'};
-              color:${isSel ? '#1F2922' : '#FAF3E1'};
-            ">${isSel ? '✓ Geselecteerd — weghalen' : '+ Selecteren'}</button>
-            <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" style="
-              font-size:11px; color:${cat.color}; text-decoration:none; font-weight:600;
-              white-space:nowrap;
-            ">Maps ↗</a>
-          </div>
-          <button data-sugg-hide="${idx}" style="
-            width:100%; margin-top:6px; padding:5px 8px;
-            border:none; background:transparent; cursor:pointer;
-            font-family:'DM Sans',sans-serif; font-size:10.5px;
-            color:rgba(31,41,34,0.5); text-decoration:underline;
-          ">Niet meer tonen in suggesties</button>
-        </div>
-      `, { closeButton: false });
-
-      const hasHover = typeof window !== 'undefined'
-        && window.matchMedia('(hover: hover)').matches;
-      if (hasHover) {
-        m.on('mouseover', () => m.openPopup());
-        // Klik selecteert direct; Leaflet sluit daarbij zelf de popup
-        m.on('click', () => onToggleRef.current(idx));
-      }
-      markersRef.current.push(m);
+      const isSel = selectedRef.current.has(idx);
+      const m = L.marker(r.coords, { icon: markerIcon(L, r, isSel) }).addTo(map);
+      m.bindPopup(popupHtml(r, idx, isSel), { closeButton: false, maxWidth: 260 });
+      // Hover opent de popup (desktop); tikken doet dat standaard al.
+      // Selecteren gebeurt uitsluitend via de knop in de popup.
+      m.on('mouseover', () => m.openPopup());
+      markerMapRef.current.set(idx, { marker: m, result: r });
     });
 
     // Inzoomen op de resultaten
@@ -1904,7 +1925,20 @@ const SuggestionsMap = ({ stay, results, selected, onToggle, onHide }) => {
       if (stay?.coords) pts.push(stay.coords);
       map.fitBounds(L.latLngBounds(pts), { padding: [30, 30], maxZoom: 13 });
     }
-  }, [results, selected, stay, ready]);
+  }, [results, stay, ready]);
+
+  // Selectie-wijziging: alleen icoon + popup-inhoud verversen, in situ.
+  useEffect(() => {
+    const L = leafletRef.current;
+    if (!L || !ready) return;
+    markerMapRef.current.forEach(({ marker, result }, idx) => {
+      if (!result) return; // verblijf-marker
+      const isSel = selected.has(idx);
+      marker.setIcon(markerIcon(L, result, isSel));
+      marker.setPopupContent(popupHtml(result, idx, isSel));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, ready]);
 
   return (
     <div
@@ -1916,6 +1950,9 @@ const SuggestionsMap = ({ stay, results, selected, onToggle, onHide }) => {
         position: 'relative', marginBottom: 14,
       }}
     >
+      {full && topBar && (
+        <div style={{ marginBottom: 8, paddingRight: 56 }}>{topBar}</div>
+      )}
       <div
         ref={containerRef}
         style={{
@@ -1933,8 +1970,8 @@ const SuggestionsMap = ({ stay, results, selected, onToggle, onHide }) => {
         aria-label={full ? 'Verkleinen' : 'Volledig scherm'}
         style={{
           position: 'absolute',
-          top: full ? 20 : 10,
-          right: full ? 20 : 10,
+          top: full ? 16 : 10,
+          right: full ? 16 : 10,
           zIndex: 1001,
           width: 36, height: 36, borderRadius: 10,
           border: `1px solid ${COLORS.hairline}`,
@@ -2079,6 +2116,47 @@ const SuggestionsSheet = ({ stays, existingNames, existingCoords, exclusions, on
   // eslint-disable-next-line react-hooks/exhaustive-deps
   [results, catFilter]);
 
+  // Categorie-chips — gedeeld tussen de sheet en de fullscreen-kaart
+  const catChips = results.length === 0 ? null : (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      {CATEGORY_ORDER.filter(k => catCounts[k]).map(catKey => {
+        const cat = CATEGORIES[catKey];
+        const active = catFilter.has(catKey);
+        return (
+          <button
+            key={catKey}
+            onClick={() => toggleCat(catKey)}
+            style={{
+              padding: '5px 10px', borderRadius: 99,
+              fontSize: 12, fontWeight: 600,
+              fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
+              background: active ? cat.color : 'transparent',
+              color: active ? COLORS.cream : COLORS.ink,
+              border: `1px solid ${active ? cat.color : COLORS.hairline}`,
+              display: 'flex', alignItems: 'center', gap: 5,
+            }}
+          >
+            <span>{cat.emoji}</span>
+            {cat.name}
+            <span style={{ opacity: 0.7, fontWeight: 500 }}>{catCounts[catKey]}</span>
+          </button>
+        );
+      })}
+      {catFilter.size > 0 && (
+        <button
+          onClick={() => setCatFilter(new Set())}
+          style={{
+            padding: '5px 10px', borderRadius: 99,
+            fontSize: 12, fontWeight: 600,
+            fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
+            background: 'transparent', color: COLORS.inkLight,
+            border: 'none', textDecoration: 'underline',
+          }}
+        >wis filter</button>
+      )}
+    </div>
+  );
+
   const confirmAdd = () => {
     const picked = results.filter((_, idx) => selected.has(idx));
     if (picked.length === 0) return;
@@ -2180,43 +2258,7 @@ const SuggestionsSheet = ({ stays, existingNames, existingCoords, exclusions, on
 
             {results.length > 0 && (
               <>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-                  {CATEGORY_ORDER.filter(k => catCounts[k]).map(catKey => {
-                    const cat = CATEGORIES[catKey];
-                    const active = catFilter.has(catKey);
-                    return (
-                      <button
-                        key={catKey}
-                        onClick={() => toggleCat(catKey)}
-                        style={{
-                          padding: '5px 10px', borderRadius: 99,
-                          fontSize: 12, fontWeight: 600,
-                          fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
-                          background: active ? cat.color : 'transparent',
-                          color: active ? COLORS.cream : COLORS.ink,
-                          border: `1px solid ${active ? cat.color : COLORS.hairline}`,
-                          display: 'flex', alignItems: 'center', gap: 5,
-                        }}
-                      >
-                        <span>{cat.emoji}</span>
-                        {cat.name}
-                        <span style={{ opacity: 0.7, fontWeight: 500 }}>{catCounts[catKey]}</span>
-                      </button>
-                    );
-                  })}
-                  {catFilter.size > 0 && (
-                    <button
-                      onClick={() => setCatFilter(new Set())}
-                      style={{
-                        padding: '5px 10px', borderRadius: 99,
-                        fontSize: 12, fontWeight: 600,
-                        fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
-                        background: 'transparent', color: COLORS.inkLight,
-                        border: 'none', textDecoration: 'underline',
-                      }}
-                    >wis filter</button>
-                  )}
-                </div>
+                <div style={{ marginBottom: 10 }}>{catChips}</div>
 
                 <div style={{
                   display: 'flex', gap: 0, marginBottom: 14,
@@ -2244,6 +2286,7 @@ const SuggestionsSheet = ({ stays, existingNames, existingCoords, exclusions, on
                     selected={selected}
                     onToggle={toggle}
                     onHide={hideResult}
+                    topBar={catChips}
                   />
                 )}
 

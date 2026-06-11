@@ -132,6 +132,9 @@ async function enrichWithWikipedia(suggestions) {
     }
     const wikiUrl = data.content_urls?.desktop?.page;
     if (!s.website && wikiUrl) s.website = wikiUrl;
+    // Afbeelding van het artikel, indien aanwezig
+    const thumb = data.thumbnail?.source || data.originalimage?.source;
+    if (thumb) s.image = String(thumb).slice(0, 400);
   }));
 
   // intern veld niet naar de client sturen
