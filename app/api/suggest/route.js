@@ -87,11 +87,48 @@ function buildSuggestions(candidates, origin) {
       distKm: Math.round(haversineKm(origin, c.coords) * 10) / 10,
       place: c.place ? String(c.place).slice(0, 40) : null,
       website: c.website ? String(c.website).slice(0, 200) : null,
-      description: c.description ? String(c.description).slice(0, 140) : null,
+      description: c.description ? String(c.description).slice(0, 220) : null,
+      wikipedia: c.wikipedia || null,
     });
   }
   out.sort((a, b) => a.distKm - b.distKm);
   return out.slice(0, 60);
+}
+
+// ── Wikipedia-verrijking ────────────────────────────────────────────
+// Veel bezienswaardigheden hebben in OSM een wikipedia-tag ("fr:Château …").
+// De gratis Wikipedia REST API geeft daarvan de eerste alinea terug.
+// We verrijken alleen resultaten zonder omschrijving, max 20 per zoekactie.
+async function enrichWithWikipedia(suggestions) {
+  const targets = suggestions
+    .filter(s => s.wikipedia && (!s.description || s.description.length < 40))
+    .slice(0, 20);
+
+  await Promise.allSettled(targets.map(async (s) => {
+    const tag = s.wikipedia;
+    const m = /^([a-z]{2,3}):(.+)$/.exec(tag);
+    const lang = m ? m[1] : 'en';
+    const title = (m ? m[2] : tag).trim().replace(/ /g, '_');
+    const url = `https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'VakantiePlanner/1.0 (familie-vakantieplanner)' },
+      signal: AbortSignal.timeout(6_000),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const extract = (data.extract || '').trim();
+    if (extract) {
+      s.description = extract.length > 240
+        ? extract.slice(0, 240).replace(/\s+\S*$/, '') + '…'
+        : extract;
+    }
+    const wikiUrl = data.content_urls?.desktop?.page;
+    if (!s.website && wikiUrl) s.website = wikiUrl;
+  }));
+
+  // intern veld niet naar de client sturen
+  suggestions.forEach(s => { delete s.wikipedia; });
+  return suggestions;
 }
 
 // ── Bron 1: Geoapify Places ─────────────────────────────────────────
@@ -133,6 +170,7 @@ async function fetchGeoapify(lat, lng, radius, apiKey) {
       place: p.city || p.village || p.town || p.address_line2 || null,
       website: p.website || raw.website || raw['contact:website'] || null,
       description: raw['description:nl'] || raw.description || null,
+      wikipedia: p.wiki_and_media?.wikipedia || raw.wikipedia || null,
     });
   }
   return candidates;
@@ -206,6 +244,7 @@ async function fetchOverpass(lat, lng, radius, errors) {
           place: tags['addr:city'] || tags['addr:village'] || null,
           website: tags.website || tags['contact:website'] || null,
           description: tags['description:nl'] || tags.description || null,
+          wikipedia: tags.wikipedia || null,
         });
       }
       return candidates;
@@ -248,10 +287,8 @@ async function handle(request, latRaw, lngRaw, radiusRaw) {
   if (apiKey) {
     try {
       const candidates = await fetchGeoapify(lat, lng, radius, apiKey);
-      return Response.json({
-        suggestions: buildSuggestions(candidates, [lat, lng]),
-        source: 'geoapify',
-      });
+      const suggestions = await enrichWithWikipedia(buildSuggestions(candidates, [lat, lng]));
+      return Response.json({ suggestions, source: 'geoapify' });
     } catch (err) {
       errors.push(`geoapify: ${String(err?.message ?? err)}`);
       // val door naar Overpass
@@ -261,10 +298,8 @@ async function handle(request, latRaw, lngRaw, radiusRaw) {
   // 2. Overpass (reserve; publieke servers weigeren Vercel-IP's regelmatig)
   const candidates = await fetchOverpass(lat, lng, radius, errors);
   if (candidates) {
-    return Response.json({
-      suggestions: buildSuggestions(candidates, [lat, lng]),
-      source: 'overpass',
-    });
+    const suggestions = await enrichWithWikipedia(buildSuggestions(candidates, [lat, lng]));
+    return Response.json({ suggestions, source: 'overpass' });
   }
 
   const hint = apiKey
