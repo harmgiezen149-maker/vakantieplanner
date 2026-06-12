@@ -2082,7 +2082,8 @@ const SuggestionsMap = ({ stay, results, selected, onToggle, onHide, topBar }) =
   );
 };
 
-const SuggestionsSheet = ({ stays, existingNames, existingCoords, exclusions, onExclude, onClearExclusions, onAdd, onClose }) => {
+const SuggestionsSheet = ({ stays, days, plan, existingNames, existingCoords, exclusions, onExclude, onClearExclusions, onAdd, onClose }) => {
+  const [choosingDay, setChoosingDay] = useState(false);
   // Een suggestie geldt als "al toegevoegd" wanneer de naam overeenkomt
   // óf wanneer hij binnen ~60 m van een bestaande activiteit ligt.
   const isAlreadyAdded = (sugg) => {
@@ -2252,7 +2253,7 @@ const SuggestionsSheet = ({ stays, existingNames, existingCoords, exclusions, on
     </div>
   );
 
-  const confirmAdd = () => {
+  const confirmAdd = (dayKey = null) => {
     const picked = results.filter((_, idx) => selected.has(idx));
     if (picked.length === 0) return;
     onAdd(picked.map(p => ({
@@ -2262,7 +2263,7 @@ const SuggestionsSheet = ({ stays, existingNames, existingCoords, exclusions, on
       coords: p.coords,
       note: [p.label, p.place, `≈ ${p.distKm} km van ${stay?.name ?? 'verblijf'}`]
         .filter(Boolean).join(' · '),
-    })));
+    })), dayKey);
   };
 
   return (
@@ -2492,22 +2493,95 @@ const SuggestionsSheet = ({ stays, existingNames, existingCoords, exclusions, on
                   );
                 })}
 
-                <button
-                  onClick={confirmAdd}
-                  disabled={selected.size === 0}
-                  style={{
-                    width: '100%', padding: 14, marginTop: 4,
-                    background: selected.size === 0 ? COLORS.hairline : COLORS.sunset,
-                    color: selected.size === 0 ? COLORS.inkLight : COLORS.cream,
-                    border: 'none', borderRadius: 12,
-                    fontSize: 14, fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
-                    cursor: selected.size === 0 ? 'default' : 'pointer',
-                  }}
-                >
-                  {selected.size === 0
-                    ? 'Vink activiteiten aan om toe te voegen'
-                    : `${selected.size} ${selected.size === 1 ? 'activiteit' : 'activiteiten'} toevoegen`}
-                </button>
+                {!choosingDay ? (
+                  <button
+                    onClick={() => setChoosingDay(true)}
+                    disabled={selected.size === 0}
+                    style={{
+                      width: '100%', padding: 14, marginTop: 4,
+                      background: selected.size === 0 ? COLORS.hairline : COLORS.sunset,
+                      color: selected.size === 0 ? COLORS.inkLight : COLORS.cream,
+                      border: 'none', borderRadius: 12,
+                      fontSize: 14, fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
+                      cursor: selected.size === 0 ? 'default' : 'pointer',
+                    }}
+                  >
+                    {selected.size === 0
+                      ? 'Vink activiteiten aan om toe te voegen'
+                      : `${selected.size} ${selected.size === 1 ? 'activiteit' : 'activiteiten'} toevoegen`}
+                  </button>
+                ) : (
+                  <div style={{
+                    marginTop: 4, padding: 14, borderRadius: 12,
+                    background: COLORS.creamSoft,
+                  }}>
+                    <div style={{
+                      fontFamily: "'Fraunces', serif", fontSize: 15,
+                      color: COLORS.forest, marginBottom: 4,
+                    }}>
+                      Meteen inplannen?
+                    </div>
+                    <div style={{ fontSize: 12, color: COLORS.inkLight, marginBottom: 10 }}>
+                      Kies een dag voor {selected.size === 1 ? 'deze activiteit' : `alle ${selected.size} activiteiten`}, of voeg ze alleen toe aan de lijst.
+                    </div>
+                    <div style={{
+                      maxHeight: 220, overflowY: 'auto',
+                      display: 'flex', flexDirection: 'column', gap: 6,
+                      marginBottom: 10,
+                    }}>
+                      {(days || []).map(d => {
+                        const count = (plan?.[d.key] || []).length;
+                        return (
+                          <button
+                            key={d.key}
+                            onClick={() => confirmAdd(d.key)}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 10,
+                              padding: '10px 12px', width: '100%', textAlign: 'left',
+                              background: COLORS.cream,
+                              border: `1px solid ${COLORS.hairline}`,
+                              borderLeft: `4px solid ${d.stay?.color || COLORS.forest}`,
+                              borderRadius: 10, cursor: 'pointer',
+                              fontFamily: "'DM Sans', sans-serif",
+                            }}
+                          >
+                            <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.charcoal }}>
+                              {d.dayShort} {d.date}
+                            </span>
+                            <span style={{ fontSize: 11, color: COLORS.inkLight }}>
+                              {d.label ? `${d.label} · ` : ''}{d.stay?.name}
+                            </span>
+                            <span style={{ marginLeft: 'auto', fontSize: 11, color: COLORS.inkLight }}>
+                              {count > 0 ? `${count} gepland` : ''}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        onClick={() => confirmAdd(null)}
+                        style={{
+                          flex: 1, padding: 11,
+                          background: 'transparent', color: COLORS.forest,
+                          border: `1px solid ${COLORS.forest}`, borderRadius: 10,
+                          fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
+                          cursor: 'pointer',
+                        }}
+                      >Zonder dag toevoegen</button>
+                      <button
+                        onClick={() => setChoosingDay(false)}
+                        style={{
+                          padding: '11px 16px',
+                          background: 'transparent', color: COLORS.inkLight,
+                          border: 'none', borderRadius: 10,
+                          fontSize: 13, fontFamily: "'DM Sans', sans-serif",
+                          cursor: 'pointer', textDecoration: 'underline',
+                        }}
+                      >Terug</button>
+                    </div>
+                  </div>
+                )}
               </>
             )}
 
@@ -2925,25 +2999,31 @@ export default function Planner({ authRequired }) {
       {sheet?.type === 'suggestions' && (
         <SuggestionsSheet
           stays={stays}
+          days={days}
+          plan={plan}
           existingNames={new Set(allActivities.map(a => a.name.toLowerCase()))}
           existingCoords={allActivities.filter(a => a.coords).map(a => a.coords)}
           exclusions={suggestExclusions}
           onExclude={(ex) => setSuggestExclusions(xs => [...xs, ex])}
           onClearExclusions={() => setSuggestExclusions([])}
-          onAdd={(picked) => {
+          onAdd={(picked, dayKey) => {
             const ts = Date.now();
-            setCustomActivities(cs => [
-              ...cs,
-              ...picked.map((p, i) => ({
-                id: `sugg_${ts}_${i}`,
-                name: p.name,
-                category: p.category,
-                emoji: p.emoji,
-                coords: p.coords,
-                note: p.note,
-                custom: true,
-              })),
-            ]);
+            const newActs = picked.map((p, i) => ({
+              id: `sugg_${ts}_${i}`,
+              name: p.name,
+              category: p.category,
+              emoji: p.emoji,
+              coords: p.coords,
+              note: p.note,
+              custom: true,
+            }));
+            setCustomActivities(cs => [...cs, ...newActs]);
+            if (dayKey) {
+              setPlan(prev => ({
+                ...prev,
+                [dayKey]: [...(prev?.[dayKey] || []), ...newActs.map(a => a.id)],
+              }));
+            }
             setSheet(null);
           }}
           onClose={() => setSheet(null)}
