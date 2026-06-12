@@ -277,7 +277,9 @@ export default function PackingList() {
   const pct = total ? Math.round((done / total) * 100) : 0;
 
   // Solo-modus: welke categorie hoort bij ?cat=…
-  const soloCategory = soloCat ? categories.find((c) => c.id === soloCat) || null : null;
+  const soloCategory = soloCat
+    ? categories.find((c) => String(c.id) === String(soloCat).trim()) || null
+    : null;
   const soloItems = soloCategory ? items.filter((it) => it.categoryId === soloCategory.id) : null;
   const soloDone = soloItems ? soloItems.filter((it) => it.checked).length : 0;
 
@@ -416,9 +418,11 @@ export default function PackingList() {
           {(() => {
             const visibleCats = soloCategory
               ? [soloCategory]
-              : categories.filter(
-                  (cat) => catFilter.length === 0 || catFilter.includes(cat.id),
-                );
+              : (soloCat && categories.length > 0)
+                ? [] // onbekende ?cat= → melding hierboven, geen volledige lijst
+                : categories.filter(
+                    (cat) => catFilter.length === 0 || catFilter.includes(cat.id),
+                  );
             const anyVisibleItems = items.some(
               (it) =>
                 (catFilter.length === 0 || catFilter.includes(it.categoryId)) &&
