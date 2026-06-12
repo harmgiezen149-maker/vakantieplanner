@@ -242,6 +242,7 @@ const Header = ({ tripConfig, stays, totalDays, stats, name, onNameChange, syncS
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: '0 1 200px', minWidth: 170 }}>
           {[
+            { href: '/dag', icon: <CalendarIcon size={18} />, label: 'Dagoverzicht' },
             { href: '/kaart', icon: <MapIcon size={18} />, label: 'Kaart' },
             { href: '/checklist', icon: <CheckSquare size={18} />, label: 'Auto & documenten' },
             { href: '/inpakken', icon: <Backpack size={18} />, label: 'Inpaklijst' },

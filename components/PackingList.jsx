@@ -22,6 +22,13 @@ export default function PackingList() {
   const [catFilter, setCatFilter] = useState([]); // lege array = alle categorieën
   const [hideChecked, setHideChecked] = useState(false);
 
+  // Persoonlijke pagina: /inpakken?cat=<id> toont één categorie
+  const [soloCat, setSoloCat] = useState(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setSoloCat(params.get('cat'));
+  }, []);
+
   const saveTimer = useRef(null);
   // Houd de laatste staat vast zodat de debounced save altijd het nieuwste pakt
   const latest = useRef({ categories: [], items: [] });
@@ -269,6 +276,11 @@ export default function PackingList() {
   const done = items.filter((it) => it.checked).length;
   const pct = total ? Math.round((done / total) * 100) : 0;
 
+  // Solo-modus: welke categorie hoort bij ?cat=…
+  const soloCategory = soloCat ? categories.find((c) => c.id === soloCat) || null : null;
+  const soloItems = soloCategory ? items.filter((it) => it.categoryId === soloCategory.id) : null;
+  const soloDone = soloItems ? soloItems.filter((it) => it.checked).length : 0;
+
   const formattedDate = updatedAt
     ? new Date(updatedAt).toLocaleString('nl-NL', {
         day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
@@ -281,14 +293,22 @@ export default function PackingList() {
 
       <header style={S.header}>
         <a href="/" style={S.backLink}>‹ Terug naar planner</a>
-        <p style={S.kicker}>Vakantie · Inpakken</p>
-        <h1 style={S.title}>Wat gaat er mee</h1>
-        <p style={S.sub}>
-          Maak je eigen categorieën en items aan, met aantal. De lijst is
-          gedeeld — iedereen vinkt af wat ingepakt is.
-        </p>
+        <p style={S.kicker}>{soloCategory ? 'Vakantie · Persoonlijke inpaklijst' : 'Vakantie · Inpakken'}</p>
+        <h1 style={S.title}>{soloCategory ? soloCategory.name : 'Wat gaat er mee'}</h1>
+        {soloCategory ? (
+          <p style={S.sub}>
+            Jouw eigen lijst. Vinkjes worden centraal opgeslagen en zijn ook
+            zichtbaar in de{' '}
+            <a href="/inpakken" style={{ color: teal, fontWeight: 600 }}>volledige inpaklijst</a>.
+          </p>
+        ) : (
+          <p style={S.sub}>
+            Maak je eigen categorieën en items aan, met aantal. De lijst is
+            gedeeld — iedereen vinkt af wat ingepakt is.
+          </p>
+        )}
 
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+        <div style={{ display: soloCategory ? 'none' : 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
           <input
             ref={importInputRef}
             type="file"
@@ -319,9 +339,16 @@ export default function PackingList() {
 
         <div style={S.progressWrap}>
           <div style={S.progressTrack}>
-            <div style={{ ...S.progressFill, width: `${pct}%` }} />
+            <div style={{
+              ...S.progressFill,
+              width: `${soloItems
+                ? (soloItems.length ? Math.round((soloDone / soloItems.length) * 100) : 0)
+                : pct}%`,
+            }} />
           </div>
-          <span style={S.progressLabel}>{done}/{total} ingepakt</span>
+          <span style={S.progressLabel}>
+            {soloItems ? `${soloDone}/${soloItems.length} ingepakt` : `${done}/${total} ingepakt`}
+          </span>
         </div>
 
         <div style={S.nameRow}>
@@ -341,6 +368,13 @@ export default function PackingList() {
         <p style={S.loading}>Laden…</p>
       ) : (
         <div style={S.sections}>
+          {soloCat && !soloCategory && categories.length > 0 && (
+            <p style={S.empty}>
+              Deze categorie bestaat niet (meer).{' '}
+              <a href="/inpakken" style={{ color: teal, fontWeight: 600 }}>Naar de volledige lijst</a>
+            </p>
+          )}
+
           {categories.length === 0 && (
             <p style={S.empty}>
               Nog geen categorieën. Maak er hieronder een aan, bijvoorbeeld
@@ -348,7 +382,7 @@ export default function PackingList() {
             </p>
           )}
 
-          {categories.length > 0 && (
+          {categories.length > 0 && !soloCategory && (
             <div style={S.filterBar}>
               <div style={S.filterChips}>
                 <button
@@ -380,9 +414,11 @@ export default function PackingList() {
           )}
 
           {(() => {
-            const visibleCats = categories.filter(
-              (cat) => catFilter.length === 0 || catFilter.includes(cat.id),
-            );
+            const visibleCats = soloCategory
+              ? [soloCategory]
+              : categories.filter(
+                  (cat) => catFilter.length === 0 || catFilter.includes(cat.id),
+                );
             const anyVisibleItems = items.some(
               (it) =>
                 (catFilter.length === 0 || catFilter.includes(it.categoryId)) &&
@@ -409,7 +445,7 @@ export default function PackingList() {
                   <div style={S.sectionHead}>
                     <h2 style={S.sectionTitle}>{cat.name}</h2>
                     <span style={S.sectionCount}>{catDone}/{catItems.length}</span>
-                    {catFilter.length === 0 && categories.length > 1 && (
+                    {!soloCategory && catFilter.length === 0 && categories.length > 1 && (
                       <span style={S.reorder}>
                         <button
                           style={{ ...S.reorderBtn, ...(catIndex === 0 ? S.reorderBtnOff : {}) }}
@@ -429,13 +465,24 @@ export default function PackingList() {
                         </button>
                       </span>
                     )}
-                    <button
-                      style={S.catDelete}
-                      onClick={() => removeCategory(cat.id)}
-                      title="Categorie verwijderen"
-                    >
-                      ✕
-                    </button>
+                    {!soloCategory && (
+                      <a
+                        href={`/inpakken?cat=${cat.id}`}
+                        title={`Eigen pagina van ${cat.name}`}
+                        style={S.soloLink}
+                      >
+                        👤
+                      </a>
+                    )}
+                    {!soloCategory && (
+                      <button
+                        style={S.catDelete}
+                        onClick={() => removeCategory(cat.id)}
+                        title="Categorie verwijderen"
+                      >
+                        ✕
+                      </button>
+                    )}
                 </div>
 
                 <ul style={S.list}>
@@ -492,6 +539,7 @@ export default function PackingList() {
             });
           })()}
 
+          {!soloCategory && (
           <div style={S.addCatCard}>
             <input
               style={S.addCatInput}
@@ -502,6 +550,7 @@ export default function PackingList() {
             />
             <button style={S.addCatBtn} onClick={addCategory}>+ Categorie</button>
           </div>
+          )}
         </div>
       )}
     </div>
@@ -533,6 +582,10 @@ const S = {
   kicker: { fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase', color: teal, fontWeight: 600, margin: '0 0 6px' },
   title: { fontFamily: "'Fraunces', serif", fontSize: 34, fontWeight: 700, lineHeight: 1.05, margin: '0 0 8px' },
   sub: { fontSize: 15, lineHeight: 1.5, color: '#57534e', margin: '0 0 20px' },
+  soloLink: {
+    textDecoration: 'none', fontSize: 14, padding: '2px 6px',
+    borderRadius: 8, lineHeight: 1,
+  },
   resetBtn: {
     fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
     padding: '8px 14px', marginBottom: 16,
