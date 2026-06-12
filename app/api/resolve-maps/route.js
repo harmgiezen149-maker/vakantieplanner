@@ -1,0 +1,112 @@
+// Lost Google Maps-links op naar naam + coördinaten.
+// Korte links (maps.app.goo.gl) vereisen het volgen van de redirect —
+// dat kan niet vanuit de browser (CORS), dus dat doen we hier server-side.
+//
+// POST { url } → { name, coords: [lat, lng], finalUrl }
+
+export const dynamic = 'force-dynamic';
+
+const ALLOWED_HOSTS = new Set([
+  'maps.app.goo.gl',
+  'goo.gl',
+  'g.co',
+  'maps.google.com',
+  'www.google.com',
+  'google.com',
+  'www.google.nl',
+  'google.nl',
+]);
+
+let calls = [];
+function rateLimited() {
+  const now = Date.now();
+  calls = calls.filter(t => now - t < 60_000);
+  if (calls.length >= 20) return true;
+  calls.push(now);
+  return false;
+}
+
+// Haal naam + coördinaten uit een (volledige) Google Maps-URL
+function parseMapsUrl(urlStr) {
+  let name = null;
+  let coords = null;
+
+  const placeMatch = /\/place\/([^/@?]+)/.exec(urlStr);
+  if (placeMatch) {
+    try {
+      name = decodeURIComponent(placeMatch[1]).replace(/\+/g, ' ').trim();
+    } catch { /* laat null */ }
+  }
+
+  // Voorkeur: het exacte plek-anker (!3d..!4d..), dan kaartcentrum (@..),
+  // dan q=lat,lng
+  const pin = /!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)/.exec(urlStr);
+  const at = /@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/.exec(urlStr);
+  const q = /[?&]q=(-?\d{1,2}\.\d+)(?:,|%2C)(-?\d{1,3}\.\d+)/.exec(urlStr);
+  const m = pin || at || q;
+  if (m) {
+    const lat = Number(m[1]);
+    const lng = Number(m[2]);
+    if (isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+      coords = [lat, lng];
+    }
+  }
+
+  return { name, coords };
+}
+
+export async function POST(request) {
+  const expectedPin = process.env.FAMILY_PIN;
+  if (expectedPin) {
+    const pin = request.headers.get('X-Family-Pin');
+    if (pin !== expectedPin) {
+      return Response.json({ error: 'unauthorized' }, { status: 401 });
+    }
+  }
+  if (rateLimited()) {
+    return Response.json({ error: 'rate_limited' }, { status: 429 });
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json({ error: 'invalid_json' }, { status: 400 });
+  }
+
+  let url;
+  try {
+    url = new URL(String(body.url || '').trim());
+  } catch {
+    return Response.json({ error: 'invalid_url' }, { status: 400 });
+  }
+  if (!['http:', 'https:'].includes(url.protocol) || !ALLOWED_HOSTS.has(url.hostname)) {
+    return Response.json({ error: 'unsupported_host' }, { status: 400 });
+  }
+
+  // Volg de redirect-keten naar de volledige Maps-URL
+  let finalUrl = url.toString();
+  try {
+    const res = await fetch(finalUrl, {
+      redirect: 'follow',
+      headers: { 'User-Agent': 'Mozilla/5.0 (VakantiePlanner/1.0)' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.url) finalUrl = res.url;
+    // Soms zit de echte URL nog in de HTML (consent-pagina's e.d.) —
+    // probeer dan een google.com/maps-URL uit de body te vissen.
+    if (!parseMapsUrl(finalUrl).coords) {
+      const text = await res.text();
+      const m = /https:\/\/www\.google\.[a-z.]+\/maps\/[^"'\\\s]+/.exec(text);
+      if (m) finalUrl = m[0].replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
+    }
+  } catch {
+    return Response.json({ error: 'resolve_failed' }, { status: 502 });
+  }
+
+  const { name, coords } = parseMapsUrl(finalUrl);
+  if (!coords) {
+    return Response.json({ error: 'no_coords_found', finalUrl }, { status: 422 });
+  }
+  return Response.json({ name, coords, finalUrl });
+}

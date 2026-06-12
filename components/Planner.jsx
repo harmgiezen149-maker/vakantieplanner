@@ -1083,6 +1083,55 @@ const PickDaySheet = ({ activity, plan, days, onPick, onClose }) => (
 // ============ LOCATION PICKER ============
 // Herbruikbaar veld met OpenStreetMap autocomplete
 
+// ── Google Maps-links en coördinaten herkennen ──────────────────────
+// "48.123456, 6.654321" (Google Maps: rechtsklik → coördinaten kopiëren)
+const COORDS_RE = /^\s*(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)\s*$/;
+
+const isGoogleMapsUrl = (txt) => {
+  try {
+    const u = new URL(txt.trim());
+    return /(^|\.)google\.[a-z.]+$/.test(u.hostname) && u.pathname.includes('/maps')
+      || ['maps.app.goo.gl', 'goo.gl', 'g.co', 'maps.google.com'].includes(u.hostname);
+  } catch { return false; }
+};
+
+const isShortMapsUrl = (txt) => {
+  try {
+    const u = new URL(txt.trim());
+    return ['maps.app.goo.gl', 'goo.gl', 'g.co'].includes(u.hostname);
+  } catch { return false; }
+};
+
+// Naam + coördinaten uit een volledige Maps-URL (client-side variant)
+const parseMapsUrlClient = (urlStr) => {
+  let name = null, coords = null;
+  const placeMatch = /\/place\/([^/@?]+)/.exec(urlStr);
+  if (placeMatch) {
+    try { name = decodeURIComponent(placeMatch[1]).replace(/\+/g, ' ').trim(); } catch {}
+  }
+  const pin = /!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)/.exec(urlStr);
+  const at = /@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/.exec(urlStr);
+  const q = /[?&]q=(-?\d{1,2}\.\d+)(?:,|%2C)(-?\d{1,3}\.\d+)/.exec(urlStr);
+  const m = pin || at || q;
+  if (m) {
+    const lat = Number(m[1]), lng = Number(m[2]);
+    if (isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+      coords = [lat, lng];
+    }
+  }
+  return { name, coords };
+};
+
+async function apiResolveMaps(url) {
+  const res = await fetch('/api/resolve-maps', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Family-Pin': getPin() },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) throw new Error('resolve_failed');
+  return res.json();
+}
+
 const LocationPicker = ({ value, onChange, accentColor = COLORS.forest, placeholder }) => {
   // value shape: { label, coords: [lat,lng] } | null
   const [query, setQuery] = useState(value?.label || '');
@@ -1112,12 +1161,57 @@ const LocationPicker = ({ value, onChange, accentColor = COLORS.forest, placehol
     }
   }, []);
 
-  const onChangeText = (txt) => {
+  // Pas een herkende plek (uit link/coördinaten) direct toe
+  const applyParsed = ({ name, coords }) => {
+    const label = name || `${coords[0].toFixed(5)}, ${coords[1].toFixed(5)}`;
+    setQuery(label);
+    setPickedCoords(coords);
+    setShowResults(false);
+    setResults([]);
+    setLoading(false);
+    onChange({ label, coords, fullName: name || label });
+  };
+
+  const onChangeText = async (txt) => {
     setQuery(txt);
-    setShowResults(true);
     if (searchTimer.current) clearTimeout(searchTimer.current);
-    // Als gebruiker tekst aanpast, coords zijn niet meer geldig tenzij ze opnieuw kiezen
     if (pickedCoords && txt !== value?.label) setPickedCoords(null);
+
+    // 1. Kale coördinaten geplakt ("48.12345, 6.65432")
+    const cm = COORDS_RE.exec(txt);
+    if (cm) {
+      applyParsed({ name: null, coords: [Number(cm[1]), Number(cm[2])] });
+      return;
+    }
+
+    // 2. Google Maps-link geplakt
+    if (isGoogleMapsUrl(txt)) {
+      setShowResults(false);
+      setResults([]);
+      const direct = parseMapsUrlClient(txt);
+      if (direct.coords) {
+        applyParsed(direct);
+        return;
+      }
+      if (isShortMapsUrl(txt)) {
+        // Korte link → server lost de redirect op
+        setLoading(true);
+        try {
+          const data = await apiResolveMaps(txt.trim());
+          applyParsed(data);
+        } catch {
+          setLoading(false);
+          setQuery('');
+          window.alert('Kon deze Maps-link niet uitlezen. Open de link in je browser en plak de volledige URL uit de adresbalk, of plak de coördinaten (rechtsklik op de plek in Google Maps).');
+        }
+        return;
+      }
+      window.alert('Geen locatie gevonden in deze link. Plak de volledige Maps-URL van een plek, of de coördinaten.');
+      return;
+    }
+
+    // 3. Gewone zoekterm
+    setShowResults(true);
     searchTimer.current = setTimeout(() => doSearch(txt), 400);
   };
 
