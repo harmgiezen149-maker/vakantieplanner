@@ -2617,7 +2617,8 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         if (d.error === 'rate_limited') throw new Error('Even te veel aanvragen — probeer het over een minuut opnieuw.');
-        throw new Error('Wandelroutes ophalen mislukt. De OpenStreetMap-servers zijn soms traag; probeer het zo nog eens.');
+        const detail = d.detail ? ` (${d.detail})` : '';
+        throw new Error(`Wandelroutes ophalen mislukt${detail}. De OpenStreetMap-servers zijn soms traag of weigeren tijdelijk; probeer het zo nog eens.`);
       }
       const data = await res.json();
       const existing = new Set(existingNames);
@@ -2818,6 +2819,23 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
   };
 
   // Eén wandelroute toevoegen aan de activiteitenlijst
+  // Vereenvoudig de routegeometrie tot één reeks punten en dun uit,
+  // zodat de opgeslagen activiteit compact blijft (max ~200 punten).
+  const simplifyRoute = (segments) => {
+    if (!Array.isArray(segments) || segments.length === 0) return null;
+    const flat = [];
+    segments.forEach(seg => seg.forEach(p => flat.push(p)));
+    if (flat.length === 0) return null;
+    const maxPts = 200;
+    if (flat.length <= maxPts) return flat;
+    const step = Math.ceil(flat.length / maxPts);
+    const out = [];
+    for (let i = 0; i < flat.length; i += step) out.push(flat[i]);
+    // zorg dat het laatste punt erbij zit
+    if (out[out.length - 1] !== flat[flat.length - 1]) out.push(flat[flat.length - 1]);
+    return out.map(p => [Math.round(p[0] * 1e5) / 1e5, Math.round(p[1] * 1e5) / 1e5]);
+  };
+
   const addHike = (h) => {
     const parts = [];
     if (h.lengthKm) parts.push(`${h.lengthKm} km`);
@@ -2834,6 +2852,7 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
       emoji: '🥾',
       coords: h.coords,
       note: parts.join(' · '),
+      routeGeometry: simplifyRoute(h.segments),
     }], null, { keepOpen: true });
     // Haal de toegevoegde route uit de lijst zodat je voortgang ziet
     setHikes(hs => hs.filter(x => x !== h));
@@ -3932,6 +3951,7 @@ export default function Planner({ authRequired }) {
               emoji: p.emoji,
               coords: p.coords,
               note: p.note,
+              ...(p.routeGeometry ? { routeGeometry: p.routeGeometry } : {}),
               custom: true,
             }));
             setCustomActivities(cs => [...cs, ...newActs]);

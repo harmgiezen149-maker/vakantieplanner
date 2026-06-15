@@ -127,6 +127,15 @@ const DayRouteMap = ({ day, acts, routeGeometry }) => {
       </div>`);
       layersRef.current.push(m);
       pts.push(act.coords);
+
+      // Wandelroute: teken de opgeslagen geometrie als groene lijn
+      if (Array.isArray(act.routeGeometry) && act.routeGeometry.length > 1) {
+        const hikeLine = L.polyline(act.routeGeometry, {
+          color: cat.color, weight: 4, opacity: 0.8,
+        }).addTo(map);
+        layersRef.current.push(hikeLine);
+        act.routeGeometry.forEach(p => pts.push(p));
+      }
     });
 
     if (day?.endCoords && (

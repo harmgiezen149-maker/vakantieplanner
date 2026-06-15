@@ -38,6 +38,8 @@ const OVERPASS_ENDPOINTS = [
   'https://overpass.kumi.systems/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
   'https://overpass.osm.jp/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+  'https://overpass.osm.ch/api/interpreter',
 ];
 
 function shuffled(arr) {
@@ -68,19 +70,9 @@ function estimateMinutes(km) {
   return Math.round((km / 4.5) * 60);
 }
 
-async function fetchHikingRoutes(lat, lng, radiusM) {
-  const around = `(around:${radiusM},${lat},${lng})`;
-  // Relaties met route=hiking of route=foot, met een naam.
-  // 'out geom' geeft de coördinaten van de onderliggende paden mee,
-  // zodat we de route op de kaart kunnen tekenen.
-  const query = `
-[out:json][timeout:25];
-(
-  relation["route"~"^(hiking|foot)$"]["name"]${around};
-);
-out tags geom 60;`;
-
+async function overpassQuery(query, errors) {
   for (const endpoint of shuffled(OVERPASS_ENDPOINTS)) {
+    const host = new URL(endpoint).hostname;
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -89,16 +81,41 @@ out tags geom 60;`;
           'User-Agent': 'VakantiePlanner/1.0 (familie-vakantieplanner)',
         },
         body: 'data=' + encodeURIComponent(query),
-        signal: AbortSignal.timeout(22_000),
+        signal: AbortSignal.timeout(13_000),
       });
-      if (!res.ok) continue;
+      if (!res.ok) { errors?.push(`${host}: ${res.status}`); continue; }
       return await res.json();
-    } catch {
-      // volgende endpoint
+    } catch (err) {
+      const msg = String(err?.message ?? err).toLowerCase().includes('abort') ? 'timeout' : String(err?.message ?? err);
+      errors?.push(`${host}: ${msg}`);
     }
   }
   return null;
 }
+
+// Fase 1 (snel, betrouwbaar): routes + tags + zwaartepunt, zonder geometrie.
+async function fetchHikingRoutes(lat, lng, radiusM, errors) {
+  const around = `(around:${radiusM},${lat},${lng})`;
+  const query = `
+[out:json][timeout:12];
+(
+  relation["route"~"^(hiking|foot)$"]["name"]${around};
+);
+out tags center 80;`;
+  return overpassQuery(query, errors);
+}
+
+// Fase 2 (zwaarder, optioneel): geometrie van specifieke relaties ophalen.
+async function fetchGeometry(ids) {
+  if (ids.length === 0) return null;
+  const idList = ids.join(',');
+  const query = `
+[out:json][timeout:12];
+relation(id:${idList});
+out geom;`;
+  return overpassQuery(query);
+}
+
 
 async function handle(request, latRaw, lngRaw, rMinRaw, rMaxRaw) {
   const expectedPin = process.env.FAMILY_PIN;
@@ -123,68 +140,89 @@ async function handle(request, latRaw, lngRaw, rMinRaw, rMaxRaw) {
   let rMinKm = Math.max(0, Number(rMinRaw) || 0) / 1000;
   if (rMinKm * 1000 >= rMax) rMinKm = 0;
 
-  const data = await fetchHikingRoutes(lat, lng, rMax);
+  const errors = [];
+  const data = await fetchHikingRoutes(lat, lng, rMax, errors);
   if (!data) {
-    return Response.json({ error: 'overpass_failed' }, { status: 502 });
+    return Response.json({ error: 'overpass_failed', detail: errors.join(' | ') }, { status: 502 });
   }
 
   const seen = new Set();
-  const routes = [];
+  let routes = [];
   for (const el of data.elements || []) {
     const tags = el.tags || {};
     const name = toStr(tags.name).trim();
     if (!name || seen.has(name.toLowerCase())) continue;
 
-    // Bouw lijnstukken op uit de way-members met geometrie
-    const segments = [];
-    let geomLengthKm = 0;
-    for (const m of el.members || []) {
-      if (m.type !== 'way' || !Array.isArray(m.geometry)) continue;
-      const pts = m.geometry
-        .filter(g => g && isFinite(g.lat) && isFinite(g.lon))
-        .map(g => [g.lat, g.lon]);
-      if (pts.length >= 2) {
-        segments.push(pts);
-        for (let i = 1; i < pts.length; i++) {
-          geomLengthKm += haversineKm(pts[i - 1], pts[i]);
-        }
-      }
-    }
-    if (segments.length === 0) continue;
-
-    // Startpunt = eerste punt van het eerste segment; center voor nabijheid
-    const start = segments[0][0];
-    const cLat = start[0];
-    const cLng = start[1];
+    const cLat = el.center?.lat;
+    const cLng = el.center?.lon;
+    if (cLat == null || cLng == null) continue;
 
     const distKm = haversineKm([lat, lng], [cLat, cLng]);
     if (distKm < rMinKm) continue;
 
     seen.add(name.toLowerCase());
     const tagLengthKm = parseLengthKm(tags);
-    const lengthKm = tagLengthKm ?? (geomLengthKm > 0 ? Math.round(geomLengthKm * 10) / 10 : null);
     routes.push({
+      id: el.id,
       name: name.slice(0, 90),
-      lengthKm: lengthKm ? Math.round(lengthKm * 10) / 10 : null,
-      lengthEstimated: tagLengthKm == null && lengthKm != null,
-      durationMin: estimateMinutes(lengthKm),
+      lengthKm: tagLengthKm ? Math.round(tagLengthKm * 10) / 10 : null,
+      lengthEstimated: false,
+      durationMin: estimateMinutes(tagLengthKm),
       coords: [cLat, cLng],
       distKm: Math.round(distKm * 10) / 10,
       network: toStr(tags.network) || null,
       website: toStr(tags.website || tags['contact:website']) || null,
       roundtrip: toStr(tags.roundtrip) === 'yes',
-      segments, // [[ [lat,lng], … ], …] voor het tekenen op de kaart
+      segments: null,
     });
   }
 
-  // Sorteer: routes met bekende lengte eerst (relevanter), dan op nabijheid
-  routes.sort((a, b) => {
-    const al = a.lengthKm == null, bl = b.lengthKm == null;
-    if (al !== bl) return al ? 1 : -1;
-    return a.distKm - b.distKm;
-  });
+  // Sorteer op nabijheid en beperk tot een werkbaar aantal
+  routes.sort((a, b) => a.distKm - b.distKm);
+  routes = routes.slice(0, 25);
 
-  return Response.json({ routes: routes.slice(0, 25) });
+  // Fase 2: probeer geometrie + (indien nodig) lengte toe te voegen.
+  // Mislukt dit of duurt het te lang, dan tonen we gewoon de lijst zonder lijnen.
+  try {
+    const geom = await fetchGeometry(routes.map(r => r.id));
+    if (geom) {
+      const byId = new Map();
+      for (const el of geom.elements || []) {
+        if (el.type !== 'relation') continue;
+        const segments = [];
+        let geomLengthKm = 0;
+        for (const m of el.members || []) {
+          if (m.type !== 'way' || !Array.isArray(m.geometry)) continue;
+          const pts = m.geometry
+            .filter(g => g && isFinite(g.lat) && isFinite(g.lon))
+            .map(g => [g.lat, g.lon]);
+          if (pts.length >= 2) {
+            segments.push(pts);
+            for (let i = 1; i < pts.length; i++) geomLengthKm += haversineKm(pts[i - 1], pts[i]);
+          }
+        }
+        byId.set(el.id, { segments, geomLengthKm });
+      }
+      routes = routes.map(r => {
+        const g = byId.get(r.id);
+        if (!g || g.segments.length === 0) return r;
+        const start = g.segments[0][0];
+        const lengthKm = r.lengthKm ?? (g.geomLengthKm > 0 ? Math.round(g.geomLengthKm * 10) / 10 : null);
+        return {
+          ...r,
+          segments: g.segments,
+          coords: start,
+          lengthKm: lengthKm ? Math.round(lengthKm * 10) / 10 : null,
+          lengthEstimated: r.lengthKm == null && lengthKm != null,
+          durationMin: estimateMinutes(lengthKm),
+        };
+      });
+    }
+  } catch {
+    // geometrie optioneel — lijst blijft bruikbaar
+  }
+
+  return Response.json({ routes });
 }
 
 export async function POST(request) {
