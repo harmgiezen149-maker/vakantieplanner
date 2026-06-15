@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Filter, X, ExternalLink, ChevronLeft, ChevronRight, Plus, Eye, EyeOff } from 'lucide-react';
+import { ArrowLeft, Filter, X, ExternalLink, ChevronLeft, ChevronRight, Plus, Eye, EyeOff, Loader2 } from 'lucide-react';
 import {
   COLORS, CATEGORIES, DEFAULT_ACTIVITIES,
   DEFAULT_TRIP_CONFIG, buildDays, staysWithColors,
@@ -433,6 +433,125 @@ const AddToDaySheet = ({ activity, plan, days, onPick, onClose, title }) => {
   );
 };
 
+// ============ "WAT LIGT HIER?" ============
+
+const WhatsHereSheet = ({ point, onCreate, onClose }) => {
+  const [state, setState] = useState('loading');
+  const [results, setResults] = useState([]);
+  const [clicked, setClicked] = useState(point);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setState('loading');
+      try {
+        const res = await fetch('/api/whats-here', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Family-Pin': getPin() },
+          body: JSON.stringify({ lat: point[0], lng: point[1] }),
+        });
+        if (!res.ok) throw new Error('failed');
+        const data = await res.json();
+        if (!alive) return;
+        setResults(data.suggestions || []);
+        setClicked(data.clicked || point);
+        setState('done');
+      } catch {
+        if (alive) setState('error');
+      }
+    })();
+    return () => { alive = false; };
+  }, [point]);
+
+  const makeActivity = (r) => onCreate({
+    name: r.name,
+    coords: r.coords,
+    note: [r.kind, r.place].filter(Boolean).join(' · ') || null,
+    emoji: r.emoji,
+  });
+
+  return (
+    <>
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: 'rgba(31, 41, 34, 0.45)',
+        zIndex: 1000, animation: 'fadeIn 0.2s ease',
+      }} />
+      <div style={{
+        position: 'fixed', bottom: 0, left: 0, right: 0,
+        background: COLORS.cream, borderRadius: '20px 20px 0 0',
+        maxHeight: '80vh', overflowY: 'auto', zIndex: 1001,
+        maxWidth: 720, margin: '0 auto',
+        animation: 'slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+        boxShadow: '0 -8px 32px rgba(31, 41, 34, 0.18)',
+      }}>
+        <div style={{
+          position: 'sticky', top: 0, background: COLORS.cream,
+          borderBottom: `1px solid ${COLORS.hairline}`, padding: '14px 20px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 1,
+        }}>
+          <h3 style={{
+            margin: 0, fontFamily: "'Fraunces', serif",
+            fontSize: 16, fontWeight: 500, color: COLORS.forest,
+          }}>Wat ligt hier?</h3>
+          <button onClick={onClose} style={{
+            border: 'none', background: 'transparent', cursor: 'pointer', padding: 4, color: COLORS.ink,
+          }}><X size={20} /></button>
+        </div>
+
+        <div style={{ padding: '12px 20px 24px' }}>
+          {state === 'loading' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: COLORS.ink, fontSize: 14, padding: '8px 0' }}>
+              <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+              Zoeken wat hier in de buurt ligt…
+            </div>
+          )}
+          {state === 'error' && (
+            <div style={{ fontSize: 14, color: COLORS.ink, lineHeight: 1.6 }}>
+              Kon niet ophalen wat hier ligt. Je kunt het exacte klikpunt wel toevoegen:
+              <button onClick={() => makeActivity({ name: 'Gekozen locatie', coords: clicked, emoji: '📍' })}
+                style={{ marginTop: 12, width: '100%', padding: 12, background: COLORS.forest, color: COLORS.cream, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", cursor: 'pointer' }}>
+                📍 Voeg deze plek toe
+              </button>
+            </div>
+          )}
+          {state === 'done' && (
+            <>
+              <p style={{ fontSize: 13, color: COLORS.inkLight, margin: '0 0 12px', lineHeight: 1.5 }}>
+                Kies een plek om er een activiteit van te maken.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+                {results.map((r, i) => (
+                  <button key={`${r.name}-${i}`} onClick={() => makeActivity(r)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 12px', width: '100%', textAlign: 'left', background: COLORS.creamSoft, border: `1px solid ${COLORS.hairline}`, borderRadius: 10, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>
+                    <span style={{ fontSize: 18 }}>{r.emoji}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'block', fontSize: 14, fontWeight: 500, color: COLORS.charcoal, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+                      <span style={{ display: 'block', fontSize: 11, color: COLORS.inkLight, marginTop: 1 }}>{[r.kind, r.place].filter(Boolean).join(' · ')}</span>
+                    </span>
+                    {r.distM > 0 && (
+                      <span style={{ fontSize: 11, color: COLORS.inkLight, whiteSpace: 'nowrap' }}>
+                        {r.distM < 1000 ? `${r.distM} m` : `${(r.distM / 1000).toFixed(1)} km`}
+                      </span>
+                    )}
+                    <Plus size={16} style={{ color: COLORS.forest, flexShrink: 0 }} />
+                  </button>
+                ))}
+                {results.length === 0 && (
+                  <div style={{ fontSize: 13, color: COLORS.inkLight }}>Niets benoembaars gevonden op deze plek.</div>
+                )}
+              </div>
+              <button onClick={() => makeActivity({ name: 'Gekozen locatie', coords: clicked, emoji: '📍' })}
+                style={{ width: '100%', padding: 11, background: 'transparent', color: COLORS.forest, border: `1px solid ${COLORS.forest}`, borderRadius: 10, fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", cursor: 'pointer' }}>
+                📍 Of: voeg het exacte klikpunt toe
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+};
+
 // ============ LEGEND ============
 
 const Legend = ({ visibleCategories }) => {
@@ -498,6 +617,8 @@ export default function MapView({ authRequired }) {
   const [pendingActivity, setPendingActivity] = useState(null);
   // Activiteit die we verplaatsen vanaf een specifieke dag: { activity, fromDayKey }
   const [movingActivity, setMovingActivity] = useState(null);
+  // Klik-op-kaart: "wat ligt hier?" punt
+  const [whatsHerePoint, setWhatsHerePoint] = useState(null);
   const [toast, setToast] = useState(null);
 
   const mapContainerRef = useRef(null);
@@ -559,6 +680,9 @@ export default function MapView({ authRequired }) {
           attribution: '© OpenStreetMap contributors',
           maxZoom: 19,
         }).addTo(map);
+        map.on('click', (e) => {
+          setWhatsHerePoint([e.latlng.lat, e.latlng.lng]);
+        });
         mapRef.current = map;
       }
     })();
@@ -705,6 +829,26 @@ export default function MapView({ authRequired }) {
     setTimeout(() => setToast(null), 2500);
     try {
       await savePlan(newPlan, customActivities, locationOverrides, tripConfig);
+    } catch (e) {
+      setToast('⚠️ Niet opgeslagen — controleer verbinding');
+      setTimeout(() => setToast(null), 3500);
+    }
+  };
+
+  // Maak een nieuwe activiteit aan vanaf een kaartklik (en sla op)
+  const createActivityHere = async ({ name, coords, note, emoji }) => {
+    const id = `custom_${Date.now()}`;
+    const newAct = {
+      id, name, category: 'custom',
+      emoji: emoji || '📍', coords, note: note || null, custom: true,
+    };
+    const newCustom = [...customActivities, newAct];
+    setCustomActivities(newCustom);
+    setWhatsHerePoint(null);
+    setToast(`"${name}" toegevoegd aan je activiteiten`);
+    setTimeout(() => setToast(null), 2500);
+    try {
+      await savePlan(plan, newCustom, locationOverrides, tripConfig);
     } catch (e) {
       setToast('⚠️ Niet opgeslagen — controleer verbinding');
       setTimeout(() => setToast(null), 3500);
@@ -1171,6 +1315,14 @@ export default function MapView({ authRequired }) {
           onClose={() => setMovingActivity(null)}
         />
       )}
+
+      {whatsHerePoint && (
+        <WhatsHereSheet
+          point={whatsHerePoint}
+          onCreate={createActivityHere}
+          onClose={() => setWhatsHerePoint(null)}
+        />
+      )}
       </>)}
 
       <style>{`
@@ -1186,6 +1338,7 @@ export default function MapView({ authRequired }) {
         }
         html, body { overflow: hidden; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
       `}</style>
     </div>

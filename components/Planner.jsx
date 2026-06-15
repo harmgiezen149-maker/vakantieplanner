@@ -1889,11 +1889,134 @@ const ConfirmSheet = ({ title, message, confirmText, onConfirm, onClose }) => (
   </Sheet>
 );
 
+// ============ "WAT LIGT HIER?" (klik op de kaart) ============
+
+const WhatsHereSheet = ({ point, onCreate, onClose }) => {
+  const [state, setState] = useState('loading');
+  const [results, setResults] = useState([]);
+  const [clicked, setClicked] = useState(point);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setState('loading');
+      try {
+        const res = await fetch('/api/whats-here', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Family-Pin': getPin() },
+          body: JSON.stringify({ lat: point[0], lng: point[1] }),
+        });
+        if (!res.ok) throw new Error('failed');
+        const data = await res.json();
+        if (!alive) return;
+        setResults(data.suggestions || []);
+        setClicked(data.clicked || point);
+        setState('done');
+      } catch {
+        if (alive) setState('error');
+      }
+    })();
+    return () => { alive = false; };
+  }, [point]);
+
+  const makeActivity = (r) => onCreate({
+    name: r.name,
+    coords: r.coords,
+    note: [r.kind, r.place].filter(Boolean).join(' · ') || null,
+    emoji: r.emoji,
+  });
+
+  return (
+    <Sheet onClose={onClose} title="Wat ligt hier?">
+      <div style={{ padding: '12px 20px 24px' }}>
+        {state === 'loading' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: COLORS.ink, fontSize: 14, padding: '8px 0' }}>
+            <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+            Zoeken wat hier in de buurt ligt…
+          </div>
+        )}
+
+        {state === 'error' && (
+          <div style={{ fontSize: 14, color: COLORS.ink, lineHeight: 1.6 }}>
+            Kon niet ophalen wat hier ligt. Je kunt deze plek wel als activiteit
+            toevoegen op de exacte coördinaten:
+            <button
+              onClick={() => makeActivity({ name: 'Gekozen locatie', coords: clicked, kind: null, place: null, emoji: '📍' })}
+              style={{
+                marginTop: 12, width: '100%', padding: 12,
+                background: COLORS.forest, color: COLORS.cream, border: 'none',
+                borderRadius: 10, fontSize: 14, fontWeight: 600,
+                fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
+              }}
+            >📍 Voeg deze plek toe</button>
+          </div>
+        )}
+
+        {state === 'done' && (
+          <>
+            <p style={{ fontSize: 13, color: COLORS.inkLight, margin: '0 0 12px', lineHeight: 1.5 }}>
+              Kies een plek om er een activiteit van te maken, of voeg het
+              exacte klikpunt toe.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+              {results.map((r, i) => (
+                <button
+                  key={`${r.name}-${i}`}
+                  onClick={() => makeActivity(r)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '11px 12px', width: '100%', textAlign: 'left',
+                    background: COLORS.creamSoft,
+                    border: `1px solid ${COLORS.hairline}`,
+                    borderRadius: 10, cursor: 'pointer',
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  <span style={{ fontSize: 18 }}>{r.emoji}</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: 'block', fontSize: 14, fontWeight: 500, color: COLORS.charcoal, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {r.name}
+                    </span>
+                    <span style={{ display: 'block', fontSize: 11, color: COLORS.inkLight, marginTop: 1 }}>
+                      {[r.kind, r.place].filter(Boolean).join(' · ')}
+                    </span>
+                  </span>
+                  {r.distM > 0 && (
+                    <span style={{ fontSize: 11, color: COLORS.inkLight, whiteSpace: 'nowrap' }}>
+                      {r.distM < 1000 ? `${r.distM} m` : `${(r.distM / 1000).toFixed(1)} km`}
+                    </span>
+                  )}
+                  <Plus size={16} style={{ color: COLORS.forest, flexShrink: 0 }} />
+                </button>
+              ))}
+              {results.length === 0 && (
+                <div style={{ fontSize: 13, color: COLORS.inkLight }}>
+                  Niets benoembaars gevonden op deze plek.
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => makeActivity({ name: 'Gekozen locatie', coords: clicked, kind: null, place: null, emoji: '📍' })}
+              style={{
+                width: '100%', padding: 11,
+                background: 'transparent', color: COLORS.forest,
+                border: `1px solid ${COLORS.forest}`, borderRadius: 10,
+                fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
+                cursor: 'pointer',
+              }}
+            >📍 Of: voeg het exacte klikpunt toe</button>
+          </>
+        )}
+      </div>
+    </Sheet>
+  );
+};
+
 // ============ OMGEVINGSSUGGESTIES ============
 
 // Kaartweergave van zoekresultaten. Markers per categorie (kleur + emoji),
 // hover/klik toont popup met info en een selecteer-knop.
-const SuggestionsMap = ({ stay, results, selected, onToggle, onHide, topBar }) => {
+const SuggestionsMap = ({ stay, results, selected, onToggle, onHide, topBar, onMapClick }) => {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const leafletRef = useRef(null);
@@ -1921,6 +2044,8 @@ const SuggestionsMap = ({ stay, results, selected, onToggle, onHide, topBar }) =
   onToggleRef.current = onToggle;
   const onHideRef = useRef(onHide);
   onHideRef.current = onHide;
+  const onMapClickRef = useRef(onMapClick);
+  onMapClickRef.current = onMapClick;
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const resultsRef = useRef(results);
@@ -2047,6 +2172,11 @@ const SuggestionsMap = ({ stay, results, selected, onToggle, onHide, topBar }) =
         setReady(true);
         // Sheet-animatie kan de containermaat beïnvloeden — herbereken
         setTimeout(() => map.invalidateSize(), 320);
+
+        // Klik op een leeg punt → "wat ligt hier?"
+        map.on('click', (e) => {
+          if (onMapClickRef.current) onMapClickRef.current([e.latlng.lat, e.latlng.lng]);
+        });
       }
     })();
 
@@ -2172,8 +2302,9 @@ const SuggestionsMap = ({ stay, results, selected, onToggle, onHide, topBar }) =
   );
 };
 
-const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, existingCoords, exclusions, onExclude, onClearExclusions, onAdd, onClose }) => {
+const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, existingCoords, exclusions, onExclude, onClearExclusions, onAdd, onCreateAt, onClose }) => {
   const [choosingDay, setChoosingDay] = useState(false);
+  const [whatsHerePoint, setWhatsHerePoint] = useState(null);
   // Een suggestie geldt als "al toegevoegd" wanneer de naam overeenkomt
   // óf wanneer hij binnen ~60 m van een bestaande activiteit ligt.
   const isAlreadyAdded = (sugg) => {
@@ -2226,6 +2357,8 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
           coords: a.coords,
           color: (CATEGORIES[a.category] || CATEGORIES.custom).color,
           dayLabel: `${d.dayShort} ${d.date}`,
+          stayId: d.stay?.id || null,
+          stayName: d.stay?.name || null,
         });
       });
     });
@@ -2241,6 +2374,20 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
   ]), [staysWithCoords, plannedAnchors]);
 
   const [anchorId, setAnchorId] = useState(null);
+  // Filter de geplande-activiteit-lijst op verblijf (null = alle verblijven)
+  const [anchorStayFilter, setAnchorStayFilter] = useState(null);
+  // Sectie "rond een geplande activiteit" in-/uitklappen
+  const [plannedOpen, setPlannedOpen] = useState(false);
+  const filteredPlannedAnchors = useMemo(() =>
+    anchorStayFilter
+      ? plannedAnchors.filter(a => a.stayId === anchorStayFilter)
+      : plannedAnchors,
+    [plannedAnchors, anchorStayFilter]);
+  // Welke verblijven komen voor in de geplande activiteiten (voor de filterknoppen)
+  const staysInPlanned = useMemo(() => {
+    const ids = new Set(plannedAnchors.map(a => a.stayId).filter(Boolean));
+    return staysWithCoords.filter(s => ids.has(s.id));
+  }, [plannedAnchors, staysWithCoords]);
   // Standaard het eerste verblijf; valt terug op eerste anker
   const effectiveAnchorId = anchorId ?? anchors[0]?.id ?? null;
   const anchor = anchors.find(a => a.id === effectiveAnchorId) || null;
@@ -2486,17 +2633,66 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
 
                 {plannedAnchors.length > 0 && (
                   <>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: COLORS.inkLight, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+                    <button
+                      onClick={() => setPlannedOpen(o => !o)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+                        background: 'transparent', border: 'none', cursor: 'pointer',
+                        padding: '2px 0', marginBottom: plannedOpen ? 6 : 0,
+                        fontFamily: "'DM Sans', sans-serif",
+                        fontSize: 11, fontWeight: 600, color: COLORS.inkLight,
+                        textTransform: 'uppercase', letterSpacing: '0.05em',
+                      }}
+                    >
+                      <span style={{
+                        display: 'inline-flex', transition: 'transform 0.15s ease',
+                        transform: plannedOpen ? 'rotate(90deg)' : 'none',
+                      }}>
+                        <ChevronRight size={14} />
+                      </span>
                       …of rond een geplande activiteit
-                    </div>
+                      <span style={{ opacity: 0.6, fontWeight: 500 }}>({plannedAnchors.length})</span>
+                    </button>
+
+                    {plannedOpen && (<>
+                    {staysInPlanned.length > 1 && (
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                        <button
+                          onClick={() => setAnchorStayFilter(null)}
+                          style={{
+                            padding: '4px 11px', borderRadius: 99, fontSize: 11.5, fontWeight: 600,
+                            fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
+                            background: anchorStayFilter === null ? COLORS.forest : 'transparent',
+                            color: anchorStayFilter === null ? COLORS.cream : COLORS.ink,
+                            border: `1px solid ${anchorStayFilter === null ? COLORS.forest : COLORS.hairline}`,
+                          }}
+                        >Alle verblijven</button>
+                        {staysInPlanned.map(s => {
+                          const active = anchorStayFilter === s.id;
+                          return (
+                            <button
+                              key={s.id}
+                              onClick={() => setAnchorStayFilter(s.id)}
+                              style={{
+                                padding: '4px 11px', borderRadius: 99, fontSize: 11.5, fontWeight: 600,
+                                fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
+                                background: active ? s.color : 'transparent',
+                                color: active ? COLORS.cream : COLORS.ink,
+                                border: `1px solid ${active ? s.color : COLORS.hairline}`,
+                              }}
+                            >🏡 {s.name}</button>
+                          );
+                        })}
+                      </div>
+                    )}
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', maxHeight: 132, overflowY: 'auto' }}>
-                      {plannedAnchors.map(a => {
+                      {filteredPlannedAnchors.map(a => {
                         const active = effectiveAnchorId === a.id;
                         return (
                           <button
                             key={a.id}
                             onClick={() => { setAnchorId(a.id); setState('idle'); setResults([]); }}
-                            title={`${a.name} · ${a.dayLabel}`}
+                            title={`${a.name} · ${a.dayLabel}${a.stayName ? ` · ${a.stayName}` : ''}`}
                             style={{
                               padding: '7px 12px', borderRadius: 99, fontSize: 12.5, fontWeight: 600,
                               fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
@@ -2514,6 +2710,7 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
                         );
                       })}
                     </div>
+                    </>)}
                   </>
                 )}
               </div>
@@ -2603,6 +2800,7 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
                     onToggle={toggle}
                     onHide={hideResult}
                     topBar={catChips}
+                    onMapClick={(pt) => setWhatsHerePoint(pt)}
                   />
                 )}
 
@@ -2865,6 +3063,14 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
           </>
         )}
       </div>
+
+      {whatsHerePoint && (
+        <WhatsHereSheet
+          point={whatsHerePoint}
+          onCreate={(act) => { onCreateAt(act); setWhatsHerePoint(null); }}
+          onClose={() => setWhatsHerePoint(null)}
+        />
+      )}
     </Sheet>
   );
 };
@@ -3299,6 +3505,18 @@ export default function Planner({ authRequired }) {
           exclusions={suggestExclusions}
           onExclude={(ex) => setSuggestExclusions(xs => [...xs, ex])}
           onClearExclusions={() => setSuggestExclusions([])}
+          onCreateAt={(act) => {
+            const id = `custom_${Date.now()}`;
+            setCustomActivities(cs => [...cs, {
+              id,
+              name: act.name,
+              category: 'custom',
+              emoji: act.emoji || '📍',
+              coords: act.coords,
+              note: act.note || null,
+              custom: true,
+            }]);
+          }}
           onAdd={(picked, dayKey) => {
             const ts = Date.now();
             const newActs = picked.map((p, i) => ({
