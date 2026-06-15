@@ -449,8 +449,10 @@ export default function DayOverview() {
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{
                               fontSize: 15, fontWeight: 600, color: COLORS.charcoal,
+                              display: 'flex', alignItems: 'center', gap: 6,
                             }}>
-                              {act.emoji} {act.name}
+                              {act.important && <span style={{ color: '#C97D5D' }}>★</span>}
+                              <span>{act.emoji} {act.name}</span>
                             </div>
                             <div style={{ fontSize: 11, color: COLORS.inkLight, marginTop: 2 }}>
                               {cat.name}

@@ -425,14 +425,18 @@ const TabBar = ({ active, setActive }) => (
 
 // ============ ACTIVITY CHIP ============
 
-const ActivityChip = ({ activity, onRemove, onEditLocation, onMoveUp, onMoveDown, canMoveUp, canMoveDown }) => {
+const ActivityChip = ({ activity, dayKey, days, onRemove, onEditLocation, onMoveUp, onMoveDown, canMoveUp, canMoveDown, onUpdateProps, onMoveToDay }) => {
   const cat = CATEGORIES[activity.category] || CATEGORIES.custom;
   const mapsLink = getMapsLink(activity);
+  const [open, setOpen] = useState(false);
   return (
+   <div>
     <div style={{
       display: 'flex', alignItems: 'center', gap: 6,
-      background: COLORS.creamSoft, borderRadius: 10, padding: '10px 10px 10px 6px',
-      borderLeft: `3px solid ${cat.color}`,
+      background: COLORS.creamSoft,
+      borderRadius: open ? '10px 10px 0 0' : 10,
+      padding: '10px 10px 10px 6px',
+      borderLeft: `3px solid ${activity.important ? COLORS.sunset : cat.color}`,
       boxShadow: '0 1px 2px rgba(31,41,34,0.04)',
     }}>
       {/* Volgorde-knoppen */}
@@ -479,9 +483,13 @@ const ActivityChip = ({ activity, onRemove, onEditLocation, onMoveUp, onMoveDown
         <div style={{
           fontSize: 14, fontWeight: 500, color: COLORS.charcoal,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{activity.name}</div>
+          display: 'flex', alignItems: 'center', gap: 5,
+        }}>
+          {activity.important && <span style={{ color: COLORS.sunset, fontSize: 13 }}>★</span>}
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{activity.name}</span>
+        </div>
         {activity.note && (
-          <div style={{ fontSize: 11, color: COLORS.inkLight, marginTop: 2 }}>{activity.note}</div>
+          <div style={{ fontSize: 11, color: COLORS.inkLight, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{activity.note}</div>
         )}
       </div>
       <button
@@ -525,13 +533,88 @@ const ActivityChip = ({ activity, onRemove, onEditLocation, onMoveUp, onMoveDown
       >
         <X size={16} />
       </button>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          border: 'none', background: open ? `${cat.color}22` : 'transparent',
+          cursor: 'pointer', color: open ? cat.color : COLORS.inkLight,
+          padding: 4, borderRadius: 6,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+        aria-label="Bewerken"
+        title="Bewerken"
+      >
+        {open ? <ChevronUp size={16} /> : <Pencil size={14} />}
+      </button>
     </div>
+
+    {open && (
+      <div style={{
+        background: COLORS.creamSoft, borderRadius: '0 0 10px 10px',
+        borderLeft: `3px solid ${activity.important ? COLORS.sunset : cat.color}`,
+        padding: '4px 12px 14px', marginTop: -1,
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <label style={chipEditLabel}>Naam</label>
+        <input
+          style={chipEditInput}
+          defaultValue={activity.name}
+          key={`n-${activity.id}-${activity.name}`}
+          onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== activity.name) onUpdateProps(activity.id, { name: v.slice(0, 80) }); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+        />
+
+        <label style={chipEditLabel}>Verplaats naar dag</label>
+        <select
+          style={chipEditInput}
+          value={dayKey}
+          onChange={(e) => { if (e.target.value !== dayKey) onMoveToDay(e.target.value); }}
+        >
+          {(days || []).map(d => (
+            <option key={d.key} value={d.key}>
+              {d.dayShort} {d.date}{d.label ? ` · ${d.label}` : ''}
+            </option>
+          ))}
+        </select>
+
+        <label style={{ ...chipEditLabel, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 10, textTransform: 'none', fontSize: 13, fontWeight: 500, color: COLORS.charcoal }}>
+          <input
+            type="checkbox"
+            checked={!!activity.important}
+            onChange={() => onUpdateProps(activity.id, { important: !activity.important })}
+            style={{ width: 16, height: 16, accentColor: COLORS.sunset }}
+          />
+          Hoofdactiviteit (belangrijk)
+        </label>
+
+        <label style={chipEditLabel}>Notitie</label>
+        <textarea
+          style={{ ...chipEditInput, minHeight: 56, resize: 'vertical', fontFamily: "'DM Sans', sans-serif" }}
+          defaultValue={activity.note || ''}
+          key={`note-${activity.id}`}
+          placeholder="Extra info, bv. reserveren, openingstijden, meenemen…"
+          onBlur={(e) => { if ((e.target.value || '') !== (activity.note || '')) onUpdateProps(activity.id, { note: e.target.value.slice(0, 500) }); }}
+        />
+      </div>
+    )}
+   </div>
   );
+};
+
+const chipEditLabel = {
+  fontSize: 11, fontWeight: 600, color: COLORS.inkLight,
+  textTransform: 'uppercase', letterSpacing: '0.05em', margin: '10px 0 4px',
+};
+const chipEditInput = {
+  fontFamily: "'DM Sans', sans-serif", fontSize: 14, padding: '9px 11px',
+  border: `1px solid ${COLORS.hairline}`, borderRadius: 10,
+  background: COLORS.cream, color: COLORS.charcoal,
+  width: '100%', boxSizing: 'border-box',
 };
 
 // ============ DAY CARD ============
 
-const DayCard = ({ day, activities, activityById, onAddClick, onRemove, onEditLocation, onMove }) => {
+const DayCard = ({ day, days: allDays, activities, activityById, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay }) => {
   const hasActivities = activities.length > 0;
   const stay = day.stay;
 
@@ -658,12 +741,16 @@ const DayCard = ({ day, activities, activityById, onAddClick, onRemove, onEditLo
                 )}
                 <ActivityChip
                   activity={activity}
+                  dayKey={day.key}
+                  days={allDays}
                   onRemove={() => onRemove(day.key, idx)}
                   onEditLocation={onEditLocation}
                   onMoveUp={() => onMove(day.key, idx, idx - 1)}
                   onMoveDown={() => onMove(day.key, idx, idx + 1)}
                   canMoveUp={idx > 0}
                   canMoveDown={idx < activities.length - 1}
+                  onUpdateProps={onUpdateProps}
+                  onMoveToDay={(toKey) => onMoveToDay(day.key, idx, toKey)}
                 />
               </React.Fragment>
             );
@@ -692,7 +779,7 @@ const DayCard = ({ day, activities, activityById, onAddClick, onRemove, onEditLo
 
 // ============ PLAN VIEW ============
 
-const PlanView = ({ days, plan, activityById, onAddClick, onRemove, onEditLocation, onMove, onOpenTripSettings }) => {
+const PlanView = ({ days, plan, activityById, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay, onOpenTripSettings }) => {
   if (days.length === 0) {
     return (
       <div style={{ padding: '40px 20px 100px', textAlign: 'center' }}>
@@ -723,11 +810,14 @@ const PlanView = ({ days, plan, activityById, onAddClick, onRemove, onEditLocati
         <DayCard
           key={day.key}
           day={day}
+          days={days}
           activities={plan[day.key] || []}
           activityById={activityById}
           onAddClick={onAddClick}
           onRemove={onRemove}
           onEditLocation={onEditLocation}
+          onUpdateProps={onUpdateProps}
+          onMoveToDay={onMoveToDay}
           onMove={onMove}
         />
       ))}
@@ -2819,6 +2909,35 @@ export default function Planner({ authRequired }) {
     });
   };
 
+  // Activiteit van de ene dag naar de andere verplaatsen (achteraan toevoegen)
+  const moveActivityToDay = (fromDayKey, index, toDayKey) => {
+    if (fromDayKey === toDayKey) return;
+    setPlan(p => {
+      const fromIds = [...(p[fromDayKey] || [])];
+      const id = fromIds[index];
+      if (id === undefined) return p;
+      fromIds.splice(index, 1);
+      const toIds = [...(p[toDayKey] || []), id];
+      return { ...p, [fromDayKey]: fromIds, [toDayKey]: toIds };
+    });
+  };
+
+  // Eigenschap van een activiteit aanpassen (naam/note/important).
+  // Custom activities worden direct gewijzigd; standaard-activiteiten via
+  // het overrides-mechanisme, zodat de wijziging overal doorwerkt.
+  const updateActivityProps = (activityId, props) => {
+    const isCustom = customActivities.some(a => a.id === activityId);
+    if (isCustom) {
+      setCustomActivities(arr => arr.map(a =>
+        a.id === activityId ? { ...a, ...props } : a));
+    } else {
+      setLocationOverrides(o => ({
+        ...o,
+        [activityId]: { ...(o[activityId] || {}), ...props },
+      }));
+    }
+  };
+
   const createCustom = (data, andAddToDay) => {
     const newId = `custom_${Date.now()}`;
     const newAct = { ...data, id: newId };
@@ -2852,8 +2971,9 @@ export default function Planner({ authRequired }) {
         const { [activityId]: _, ...rest } = o;
         return rest;
       }
-      // Voor built-in activities: gebruik override-record
-      return { ...o, [activityId]: override };
+      // Voor built-in activities: gebruik override-record (samenvoegen,
+      // zodat eerder gezette naam/notitie/belangrijk behouden blijven)
+      return { ...o, [activityId]: { ...(o[activityId] || {}), ...override } };
     });
   };
 
@@ -2939,6 +3059,8 @@ export default function Planner({ authRequired }) {
             onRemove={removeFromDay}
             onEditLocation={(act) => setSheet({ type: 'edit-location', activityId: act.id })}
             onMove={moveInDay}
+            onUpdateProps={updateActivityProps}
+            onMoveToDay={moveActivityToDay}
             onOpenTripSettings={() => setSheet({ type: 'trip-settings' })}
           />
         ) : (
