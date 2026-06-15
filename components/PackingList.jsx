@@ -24,6 +24,8 @@ export default function PackingList() {
 
   // Persoonlijke pagina: /inpakken?cat=<id> toont één categorie
   const [soloCat, setSoloCat] = useState(null);
+  // Welk item heeft zijn bewerk-/notitiepaneel open
+  const [expandedItem, setExpandedItem] = useState(null);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setSoloCat(params.get('cat'));
@@ -123,6 +125,31 @@ export default function PackingList() {
       items.filter((it) => it.categoryId !== catId),
     );
     setCatFilter((f) => f.filter((id) => id !== catId));
+  };
+
+  // Categorie hernoemen. Krijgt de nieuwe naam (genormaliseerd) al een
+  // bestaande categorie? Dan samenvoegen: items verhuizen, lege cat weg.
+  const renameCategory = (catId, rawName) => {
+    const name = rawName.trim().slice(0, 40);
+    if (!name) return;
+    const target = categories.find(
+      (c) => c.id !== catId && c.name.toLowerCase() === name.toLowerCase());
+
+    if (target) {
+      if (!window.confirm(`Er bestaat al een categorie “${target.name}”. Samenvoegen?\n\nDe items uit deze categorie verhuizen ernaartoe.`)) {
+        return;
+      }
+      apply(
+        categories.filter((c) => c.id !== catId),
+        items.map((it) => it.categoryId === catId ? { ...it, categoryId: target.id } : it),
+      );
+      setCatFilter((f) => f.filter((id) => id !== catId));
+    } else {
+      apply(
+        categories.map((c) => c.id === catId ? { ...c, name } : c),
+        items,
+      );
+    }
   };
 
   const toggleCatFilter = (catId) =>
@@ -260,6 +287,32 @@ export default function PackingList() {
 
   const removeItem = (itemId) => {
     apply(categories, items.filter((it) => it.id !== itemId));
+  };
+
+  // Itemnaam wijzigen
+  const renameItem = (itemId, label) => {
+    const v = label.trim();
+    if (!v) return;
+    apply(categories, items.map((it) =>
+      it.id === itemId ? { ...it, label: v.slice(0, 80) } : it));
+  };
+
+  // Item naar een andere categorie verplaatsen
+  const moveItemToCategory = (itemId, newCatId) => {
+    apply(categories, items.map((it) =>
+      it.id === itemId ? { ...it, categoryId: newCatId } : it));
+  };
+
+  // Belangrijk-vlag aan/uit
+  const toggleImportant = (itemId) => {
+    apply(categories, items.map((it) =>
+      it.id === itemId ? { ...it, important: !it.important } : it));
+  };
+
+  // Notitie bij een item opslaan
+  const setItemNote = (itemId, note) => {
+    apply(categories, items.map((it) =>
+      it.id === itemId ? { ...it, note: note.slice(0, 500) } : it));
   };
 
   const changeQty = (itemId, delta) => {
@@ -447,7 +500,18 @@ export default function PackingList() {
               return (
                 <section key={cat.id} style={S.section}>
                   <div style={S.sectionHead}>
-                    <h2 style={S.sectionTitle}>{cat.name}</h2>
+                    {soloCategory ? (
+                      <h2 style={S.sectionTitle}>{cat.name}</h2>
+                    ) : (
+                      <input
+                        style={S.sectionTitleInput}
+                        defaultValue={cat.name}
+                        key={cat.name}
+                        onBlur={(e) => { if (e.target.value.trim() && e.target.value !== cat.name) renameCategory(cat.id, e.target.value); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') { e.target.value = cat.name; e.target.blur(); } }}
+                        title="Klik om de categorienaam te wijzigen"
+                      />
+                    )}
                     <span style={S.sectionCount}>{catDone}/{catItems.length}</span>
                     {!soloCategory && catFilter.length === 0 && categories.length > 1 && (
                       <span style={S.reorder}>
@@ -490,7 +554,9 @@ export default function PackingList() {
                 </div>
 
                 <ul style={S.list}>
-                  {shownItems.map((it) => (
+                  {shownItems.map((it) => {
+                    const open = expandedItem === it.id;
+                    return (
                     <li key={it.id}>
                       <div style={{ ...S.item, ...(it.checked ? S.itemOn : {}) }}>
                         <button
@@ -499,8 +565,12 @@ export default function PackingList() {
                         >
                           {it.checked ? '✓' : ''}
                         </button>
+                        {it.important && (
+                          <span title="Belangrijk" style={S.starOn}>★</span>
+                        )}
                         <span style={{ ...S.label, ...(it.checked ? S.labelOn : {}) }}>
                           {it.label}
+                          {it.note ? <span style={S.noteDot} title="Heeft notitie"> ✎</span> : null}
                         </span>
                         <div style={S.qtyWrap}>
                           <button style={S.qtyBtn} onClick={() => changeQty(it.id, -1)}>−</button>
@@ -508,15 +578,65 @@ export default function PackingList() {
                           <button style={S.qtyBtn} onClick={() => changeQty(it.id, 1)}>+</button>
                         </div>
                         <button
-                          style={S.itemDelete}
-                          onClick={() => removeItem(it.id)}
-                          title="Item verwijderen"
+                          style={{ ...S.expandBtn, ...(open ? S.expandBtnOn : {}) }}
+                          onClick={() => setExpandedItem(open ? null : it.id)}
+                          title="Bewerken"
                         >
-                          🗑
+                          {open ? '▲' : '⋯'}
                         </button>
                       </div>
+
+                      {open && (
+                        <div style={S.editPanel}>
+                          <label style={S.editLabel}>Naam</label>
+                          <input
+                            style={S.editInput}
+                            defaultValue={it.label}
+                            key={`name-${it.id}-${it.label}`}
+                            onBlur={(e) => { if (e.target.value.trim() && e.target.value !== it.label) renameItem(it.id, e.target.value); }}
+                            onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                          />
+
+                          <label style={S.editLabel}>Categorie</label>
+                          <select
+                            style={S.editInput}
+                            value={it.categoryId}
+                            onChange={(e) => moveItemToCategory(it.id, e.target.value)}
+                          >
+                            {categories.map((c) => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                          </select>
+
+                          <label style={{ ...S.editLabel, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 10 }}>
+                            <input
+                              type="checkbox"
+                              checked={!!it.important}
+                              onChange={() => toggleImportant(it.id)}
+                              style={{ width: 16, height: 16, accentColor: '#C97D5D' }}
+                            />
+                            Belangrijk markeren
+                          </label>
+
+                          <label style={S.editLabel}>Notitie</label>
+                          <textarea
+                            style={{ ...S.editInput, minHeight: 60, resize: 'vertical', fontFamily: 'inherit' }}
+                            defaultValue={it.note || ''}
+                            key={`note-${it.id}`}
+                            placeholder="Extra informatie, bv. waar het ligt of een herinnering…"
+                            onBlur={(e) => { if ((e.target.value || '') !== (it.note || '')) setItemNote(it.id, e.target.value); }}
+                          />
+
+                          <button
+                            style={S.editDelete}
+                            onClick={() => { removeItem(it.id); setExpandedItem(null); }}
+                          >
+                            🗑 Item verwijderen
+                          </button>
+                        </div>
+                      )}
                     </li>
-                  ))}
+                  );})}
                 </ul>
 
                 <div style={S.addItemRow}>
@@ -589,6 +709,42 @@ const S = {
   soloLink: {
     textDecoration: 'none', fontSize: 14, padding: '2px 6px',
     borderRadius: 8, lineHeight: 1,
+  },
+  sectionTitleInput: {
+    fontFamily: "'Fraunces', serif", fontSize: 19, fontWeight: 500,
+    color: '#2D4F3E', background: 'transparent', border: '1px solid transparent',
+    borderRadius: 8, padding: '2px 6px', margin: '-2px -6px', flex: 'none',
+    maxWidth: 200, cursor: 'text',
+  },
+  starOn: { color: '#C97D5D', fontSize: 14, marginRight: 2, flexShrink: 0 },
+  noteDot: { color: '#3A7E84', fontSize: 12 },
+  expandBtn: {
+    width: 30, height: 30, border: 'none', borderRadius: 8,
+    background: 'transparent', color: '#8a8478', fontSize: 14,
+    cursor: 'pointer', flexShrink: 0, lineHeight: 1,
+  },
+  expandBtnOn: { background: '#efe9dd', color: '#2D4F3E' },
+  editPanel: {
+    margin: '2px 0 10px', padding: '12px 14px',
+    background: '#f4efe4', borderRadius: 12,
+    display: 'flex', flexDirection: 'column',
+  },
+  editLabel: {
+    fontSize: 11, fontWeight: 600, color: '#8a8478',
+    textTransform: 'uppercase', letterSpacing: '0.05em',
+    margin: '8px 0 4px',
+  },
+  editInput: {
+    fontFamily: 'inherit', fontSize: 14, padding: '9px 11px',
+    border: '1px solid #e7e2d8', borderRadius: 10,
+    background: '#fff', color: ink, width: '100%', boxSizing: 'border-box',
+  },
+  editDelete: {
+    marginTop: 14, alignSelf: 'flex-start',
+    fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
+    padding: '8px 14px', borderRadius: 10, cursor: 'pointer',
+    background: 'transparent', color: '#b4452f',
+    border: '1px solid #e3c4ba',
   },
   resetBtn: {
     fontFamily: 'inherit', fontSize: 13, fontWeight: 600,

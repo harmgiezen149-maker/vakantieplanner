@@ -11,7 +11,7 @@ const LEGACY_KEY = 'vogezen2026:inpakken';
 // De volledige staat is één document:
 // {
 //   categories: [{ id, name }],
-//   items: [{ id, categoryId, label, qty, checked }],
+//   items: [{ id, categoryId, label, qty, checked, important?, note? }],
 //   updatedBy, updatedAt
 // }
 const EMPTY = { categories: [], items: [], updatedBy: null, updatedAt: null };
