@@ -2066,6 +2066,147 @@ const WhatsHereSheet = ({ point, onCreate, onClose }) => {
   );
 };
 
+// ============ WANDELROUTES-KAART ============
+
+// Tekent gevonden wandelroutes als lijnen; tik een route aan om te markeren.
+const HikingMap = ({ anchor, hikes, activeIdx, onSelect }) => {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const leafletRef = useRef(null);
+  const layersRef = useRef([]);
+  const [ready, setReady] = useState(false);
+  const [full, setFull] = useState(false);
+
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+
+  useEffect(() => {
+    const t = setTimeout(() => mapRef.current?.invalidateSize(), 80);
+    return () => clearTimeout(t);
+  }, [full]);
+
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e) => { if (e.key === 'Escape') setFull(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [full]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!document.querySelector('link[data-leaflet]')) {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+        link.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
+        link.crossOrigin = '';
+        link.setAttribute('data-leaflet', '1');
+        document.head.appendChild(link);
+      }
+      const L = await import('leaflet');
+      if (!mounted) return;
+      leafletRef.current = L;
+      if (!mapRef.current && containerRef.current) {
+        const map = L.map(containerRef.current, {
+          center: anchor?.coords || [48.8, 6.5], zoom: 11, scrollWheelZoom: true,
+        });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© OpenStreetMap contributors', maxZoom: 19,
+        }).addTo(map);
+        mapRef.current = map;
+        setReady(true);
+        setTimeout(() => map.invalidateSize(), 320);
+      }
+    })();
+    return () => {
+      mounted = false;
+      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Routes tekenen / opnieuw tekenen bij selectie
+  useEffect(() => {
+    const map = mapRef.current;
+    const L = leafletRef.current;
+    if (!map || !L || !ready) return;
+
+    layersRef.current.forEach(l => l.remove());
+    layersRef.current = [];
+    const baseColor = CATEGORIES.hiking?.color || '#4A6F4F';
+
+    // Verblijf/anker
+    if (anchor?.coords) {
+      const m = L.marker(anchor.coords, {
+        icon: L.divIcon({
+          className: '',
+          html: `<div style="width:30px;height:30px;border-radius:50%;background:${anchor.color || baseColor};border:3px solid #FAF3E1;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 2px 8px rgba(31,41,34,0.35);">📍</div>`,
+          iconSize: [30, 30], iconAnchor: [15, 15],
+        }), zIndexOffset: 1000,
+      }).addTo(map);
+      layersRef.current.push(m);
+    }
+
+    const allPts = [];
+    hikes.forEach((h, i) => {
+      const active = i === activeIdx;
+      (h.segments || []).forEach(seg => {
+        const line = L.polyline(seg, {
+          color: active ? '#C2410C' : baseColor,
+          weight: active ? 5 : 3,
+          opacity: active ? 0.95 : (activeIdx == null ? 0.7 : 0.35),
+        }).addTo(map);
+        line.on('click', () => onSelectRef.current(i));
+        layersRef.current.push(line);
+        if (active || activeIdx == null) seg.forEach(p => allPts.push(p));
+      });
+      // Startmarker met volgnummer
+      if (h.coords) {
+        const m = L.marker(h.coords, {
+          icon: L.divIcon({
+            className: '',
+            html: `<div style="width:24px;height:24px;border-radius:50%;background:${active ? '#C2410C' : baseColor};color:#FAF3E1;border:2px solid #FAF3E1;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;font-family:'DM Sans',sans-serif;box-shadow:0 1px 4px rgba(31,41,34,0.3);">${i + 1}</div>`,
+            iconSize: [24, 24], iconAnchor: [12, 12],
+          }), zIndexOffset: active ? 800 : 400,
+        }).addTo(map);
+        m.on('click', () => onSelectRef.current(i));
+        m.bindTooltip(`${i + 1}. ${h.name}${h.lengthKm ? ` · ${h.lengthKm} km` : ''}`, { direction: 'top' });
+        layersRef.current.push(m);
+      }
+    });
+
+    const fitPts = allPts.length ? allPts : hikes.flatMap(h => h.segments?.[0] || []);
+    if (fitPts.length > 0) {
+      map.fitBounds(L.latLngBounds(fitPts), { padding: [30, 30], maxZoom: 14 });
+    }
+  }, [hikes, activeIdx, anchor, ready]);
+
+  return (
+    <div style={full ? {
+      position: 'fixed', inset: 0, zIndex: 70, background: COLORS.cream,
+      padding: 10, display: 'flex', flexDirection: 'column',
+    } : { position: 'relative', marginBottom: 14 }}>
+      <div ref={containerRef} style={{
+        width: '100%', height: full ? '100%' : 340, flex: full ? 1 : undefined,
+        borderRadius: 12, overflow: 'hidden', border: `1px solid ${COLORS.hairline}`,
+        zIndex: 0, position: 'relative',
+      }} />
+      <button
+        onClick={() => setFull(f => !f)}
+        title={full ? 'Verkleinen' : 'Volledig scherm'}
+        style={{
+          position: 'absolute', top: full ? 16 : 10, right: full ? 16 : 10, zIndex: 1001,
+          width: 36, height: 36, borderRadius: 10, border: `1px solid ${COLORS.hairline}`,
+          background: COLORS.cream, color: COLORS.forest,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', boxShadow: '0 2px 8px rgba(31,41,34,0.2)',
+        }}
+      >{full ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
+    </div>
+  );
+};
+
 // ============ OMGEVINGSSUGGESTIES ============
 
 // Kaartweergave van zoekresultaten. Markers per categorie (kleur + emoji),
@@ -2455,6 +2596,8 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
   const [catFilter, setCatFilter] = useState(new Set());
   const [results, setResults] = useState([]);
   const [hikes, setHikes] = useState([]);
+  const [hikeView, setHikeView] = useState('list'); // list | map (wandelroutes)
+  const [activeHike, setActiveHike] = useState(null);
   const [selected, setSelected] = useState(new Set());
   const [errMsg, setErrMsg] = useState('');
 
@@ -2480,6 +2623,7 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
       const existing = new Set(existingNames);
       const fresh = (data.routes || []).filter(r => !existing.has(r.name.toLowerCase()));
       setHikes(fresh);
+      setActiveHike(null);
       setState('done');
     } catch (e) {
       setErrMsg(e.message);
@@ -2896,19 +3040,54 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
             )}
 
             {mode === 'hiking' && hikes.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <>
+                <div style={{
+                  display: 'flex', gap: 0, marginBottom: 12,
+                  border: `1px solid ${COLORS.hairline}`, borderRadius: 10, overflow: 'hidden',
+                }}>
+                  {[['list', 'Lijst'], ['map', 'Kaart']].map(([key, lbl]) => (
+                    <button
+                      key={key}
+                      onClick={() => setHikeView(key)}
+                      style={{
+                        flex: 1, padding: '9px 0', border: 'none', cursor: 'pointer',
+                        fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600,
+                        background: hikeView === key ? COLORS.forest : 'transparent',
+                        color: hikeView === key ? COLORS.cream : COLORS.ink,
+                      }}
+                    >{lbl}</button>
+                  ))}
+                </div>
+
+                {hikeView === 'map' && (
+                  <HikingMap
+                    anchor={anchor}
+                    hikes={hikes}
+                    activeIdx={activeHike}
+                    onSelect={(i) => setActiveHike(prev => prev === i ? null : i)}
+                  />
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {hikes.map((h, i) => (
                   <div
                     key={`${h.name}-${i}`}
+                    onClick={() => hikeView === 'map' && setActiveHike(i)}
                     style={{
                       padding: '12px 14px', background: COLORS.creamSoft,
-                      border: `1px solid ${COLORS.hairline}`,
-                      borderLeft: `4px solid ${CATEGORIES.hiking?.color || COLORS.forest}`,
+                      border: `1px solid ${activeHike === i && hikeView === 'map' ? '#C2410C' : COLORS.hairline}`,
+                      borderLeft: `4px solid ${activeHike === i && hikeView === 'map' ? '#C2410C' : (CATEGORIES.hiking?.color || COLORS.forest)}`,
                       borderRadius: 12,
+                      cursor: hikeView === 'map' ? 'pointer' : 'default',
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                      <span style={{ fontSize: 18 }}>🥾</span>
+                      <span style={{
+                        width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+                        background: activeHike === i && hikeView === 'map' ? '#C2410C' : (CATEGORIES.hiking?.color || COLORS.forest),
+                        color: COLORS.cream, display: 'flex', alignItems: 'center',
+                        justifyContent: 'center', fontSize: 11, fontWeight: 700,
+                      }}>{i + 1}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 14, fontWeight: 600, color: COLORS.charcoal }}>
                           {h.name}
@@ -2916,7 +3095,7 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 5 }}>
                           {h.lengthKm != null && (
                             <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: `${COLORS.forest}1A`, color: COLORS.forest }}>
-                              📏 {h.lengthKm} km
+                              📏 {h.lengthKm} km{h.lengthEstimated ? '*' : ''}
                             </span>
                           )}
                           {h.durationMin != null && (
@@ -2933,16 +3112,21 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
                             start ≈ {h.distKm} km
                           </span>
                         </div>
+                        {h.lengthEstimated && (
+                          <div style={{ fontSize: 10.5, color: COLORS.inkLight, marginTop: 4, fontStyle: 'italic' }}>
+                            * lengte berekend uit de route (niet als tag opgegeven)
+                          </div>
+                        )}
                         {h.lengthKm == null && (
                           <div style={{ fontSize: 10.5, color: COLORS.inkLight, marginTop: 4, fontStyle: 'italic' }}>
-                            lengte niet bekend in OpenStreetMap
+                            lengte niet bekend
                           </div>
                         )}
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                       <button
-                        onClick={() => addHike(h)}
+                        onClick={(e) => { e.stopPropagation(); addHike(h); }}
                         style={{
                           flex: 1, padding: '9px 12px', border: 'none', borderRadius: 9,
                           background: COLORS.forest, color: COLORS.cream,
@@ -2953,20 +3137,24 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
                       <a
                         href={h.website || `https://www.google.com/maps/search/?api=1&query=${h.coords[0]},${h.coords[1]}`}
                         target="_blank" rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
                         style={{
                           padding: '9px 12px', borderRadius: 9,
                           border: `1px solid ${COLORS.hairline}`,
                           color: COLORS.forest, fontSize: 12.5, fontWeight: 600,
                           textDecoration: 'none', whiteSpace: 'nowrap',
+                          display: 'flex', alignItems: 'center',
                         }}
                       >{h.website ? 'Website ↗' : 'Maps ↗'}</a>
                     </div>
                   </div>
                 ))}
-                <div style={{ fontSize: 11, color: COLORS.inkLight, marginTop: 2, lineHeight: 1.5 }}>
-                  Wandeltijd is een schatting op ~4,5 km/u en houdt geen rekening met hoogteverschil.
                 </div>
-              </div>
+                <div style={{ fontSize: 11, color: COLORS.inkLight, marginTop: 8, lineHeight: 1.5 }}>
+                  Wandeltijd is een schatting op ~4,5 km/u en houdt geen rekening met hoogteverschil.
+                  {hikeView === 'map' && ' Tik een route of nummer op de kaart aan om hem te markeren.'}
+                </div>
+              </>
             )}
 
             {mode === 'sights' && state === 'done' && results.length === 0 && (

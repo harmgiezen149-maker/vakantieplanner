@@ -70,13 +70,15 @@ function estimateMinutes(km) {
 
 async function fetchHikingRoutes(lat, lng, radiusM) {
   const around = `(around:${radiusM},${lat},${lng})`;
-  // Relaties met route=hiking of route=foot, met een naam
+  // Relaties met route=hiking of route=foot, met een naam.
+  // 'out geom' geeft de coördinaten van de onderliggende paden mee,
+  // zodat we de route op de kaart kunnen tekenen.
   const query = `
 [out:json][timeout:25];
 (
   relation["route"~"^(hiking|foot)$"]["name"]${around};
 );
-out tags center 80;`;
+out tags geom 60;`;
 
   for (const endpoint of shuffled(OVERPASS_ENDPOINTS)) {
     try {
@@ -133,25 +135,45 @@ async function handle(request, latRaw, lngRaw, rMinRaw, rMaxRaw) {
     const name = toStr(tags.name).trim();
     if (!name || seen.has(name.toLowerCase())) continue;
 
-    const cLat = el.center?.lat;
-    const cLng = el.center?.lon;
-    if (cLat == null || cLng == null) continue;
+    // Bouw lijnstukken op uit de way-members met geometrie
+    const segments = [];
+    let geomLengthKm = 0;
+    for (const m of el.members || []) {
+      if (m.type !== 'way' || !Array.isArray(m.geometry)) continue;
+      const pts = m.geometry
+        .filter(g => g && isFinite(g.lat) && isFinite(g.lon))
+        .map(g => [g.lat, g.lon]);
+      if (pts.length >= 2) {
+        segments.push(pts);
+        for (let i = 1; i < pts.length; i++) {
+          geomLengthKm += haversineKm(pts[i - 1], pts[i]);
+        }
+      }
+    }
+    if (segments.length === 0) continue;
+
+    // Startpunt = eerste punt van het eerste segment; center voor nabijheid
+    const start = segments[0][0];
+    const cLat = start[0];
+    const cLng = start[1];
 
     const distKm = haversineKm([lat, lng], [cLat, cLng]);
     if (distKm < rMinKm) continue;
 
     seen.add(name.toLowerCase());
-    const lengthKm = parseLengthKm(tags);
+    const tagLengthKm = parseLengthKm(tags);
+    const lengthKm = tagLengthKm ?? (geomLengthKm > 0 ? Math.round(geomLengthKm * 10) / 10 : null);
     routes.push({
       name: name.slice(0, 90),
       lengthKm: lengthKm ? Math.round(lengthKm * 10) / 10 : null,
+      lengthEstimated: tagLengthKm == null && lengthKm != null,
       durationMin: estimateMinutes(lengthKm),
       coords: [cLat, cLng],
       distKm: Math.round(distKm * 10) / 10,
-      network: toStr(tags.network) || null,           // bv. lwn/rwn/nwn
-      symbol: toStr(tags['osmc:symbol'] || tags.symbol) || null,
+      network: toStr(tags.network) || null,
       website: toStr(tags.website || tags['contact:website']) || null,
       roundtrip: toStr(tags.roundtrip) === 'yes',
+      segments, // [[ [lat,lng], … ], …] voor het tekenen op de kaart
     });
   }
 
@@ -162,7 +184,7 @@ async function handle(request, latRaw, lngRaw, rMinRaw, rMaxRaw) {
     return a.distKm - b.distKm;
   });
 
-  return Response.json({ routes: routes.slice(0, 40) });
+  return Response.json({ routes: routes.slice(0, 25) });
 }
 
 export async function POST(request) {
