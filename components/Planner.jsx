@@ -2172,7 +2172,7 @@ const SuggestionsMap = ({ stay, results, selected, onToggle, onHide, topBar }) =
   );
 };
 
-const SuggestionsSheet = ({ stays, days, plan, existingNames, existingCoords, exclusions, onExclude, onClearExclusions, onAdd, onClose }) => {
+const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, existingCoords, exclusions, onExclude, onClearExclusions, onAdd, onClose }) => {
   const [choosingDay, setChoosingDay] = useState(false);
   // Een suggestie geldt als "al toegevoegd" wanneer de naam overeenkomt
   // óf wanneer hij binnen ~60 m van een bestaande activiteit ligt.
@@ -2342,6 +2342,58 @@ const SuggestionsSheet = ({ stays, days, plan, existingNames, existingCoords, ex
       )}
     </div>
   );
+
+  // Zwaartepunt van de aangevinkte suggesties (voor nabijheid per dag)
+  const selectionCenter = useMemo(() => {
+    const picked = results.filter((_, idx) => selected.has(idx)).filter(r => r.coords);
+    if (picked.length === 0) return null;
+    const lat = picked.reduce((s, r) => s + r.coords[0], 0) / picked.length;
+    const lng = picked.reduce((s, r) => s + r.coords[1], 0) / picked.length;
+    return [lat, lng];
+  }, [results, selected]);
+
+  const kmBetween = (a, b) => {
+    const R = 6371;
+    const dLat = (b[0] - a[0]) * Math.PI / 180;
+    const dLng = (b[1] - a[1]) * Math.PI / 180;
+    const x = Math.sin(dLat / 2) ** 2 +
+      Math.cos(a[0] * Math.PI / 180) * Math.cos(b[0] * Math.PI / 180) *
+      Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+  };
+
+  const NEARBY_KM = 25; // straal waarbinnen we een geplande activiteit "in de buurt" noemen
+
+  // Per dag: welke al-geplande activiteiten liggen in de buurt van de selectie
+  const dayInsights = useMemo(() => {
+    const map = {};
+    (days || []).forEach(d => {
+      const ids = plan?.[d.key] || [];
+      const planned = ids.map(id => activityById?.[id]).filter(Boolean);
+      let near = [];
+      if (selectionCenter) {
+        near = planned
+          .filter(a => a.coords)
+          .map(a => ({ act: a, km: kmBetween(selectionCenter, a.coords) }))
+          .filter(x => x.km <= NEARBY_KM)
+          .sort((a, b) => a.km - b.km);
+      }
+      map[d.key] = { total: ids.length, near };
+    });
+    return map;
+  }, [days, plan, activityById, selectionCenter]);
+
+  // Dagen sorteren: meeste nabije activiteiten eerst, dan op datum (origineel)
+  const sortedDays = useMemo(() => {
+    const arr = (days || []).map((d, i) => ({ d, i }));
+    arr.sort((a, b) => {
+      const na = dayInsights[a.d.key]?.near.length || 0;
+      const nb = dayInsights[b.d.key]?.near.length || 0;
+      if (na !== nb) return nb - na;
+      return a.i - b.i;
+    });
+    return arr.map(x => x.d);
+  }, [days, dayInsights]);
 
   const confirmAdd = (dayKey = null) => {
     const picked = results.filter((_, idx) => selected.has(idx));
@@ -2613,37 +2665,77 @@ const SuggestionsSheet = ({ stays, days, plan, existingNames, existingCoords, ex
                     </div>
                     <div style={{ fontSize: 12, color: COLORS.inkLight, marginBottom: 10 }}>
                       Kies een dag voor {selected.size === 1 ? 'deze activiteit' : `alle ${selected.size} activiteiten`}, of voeg ze alleen toe aan de lijst.
+                      {selectionCenter && (
+                        <> Dagen met al ingeplande activiteiten <strong style={{ color: COLORS.forest }}>in de buurt</strong> staan bovenaan.</>
+                      )}
                     </div>
                     <div style={{
-                      maxHeight: 220, overflowY: 'auto',
+                      maxHeight: 280, overflowY: 'auto',
                       display: 'flex', flexDirection: 'column', gap: 6,
                       marginBottom: 10,
                     }}>
-                      {(days || []).map(d => {
-                        const count = (plan?.[d.key] || []).length;
+                      {sortedDays.map(d => {
+                        const info = dayInsights[d.key] || { total: 0, near: [] };
+                        const hasNear = info.near.length > 0;
                         return (
                           <button
                             key={d.key}
                             onClick={() => confirmAdd(d.key)}
                             style={{
-                              display: 'flex', alignItems: 'center', gap: 10,
+                              display: 'flex', flexDirection: 'column', gap: 4,
                               padding: '10px 12px', width: '100%', textAlign: 'left',
-                              background: COLORS.cream,
-                              border: `1px solid ${COLORS.hairline}`,
+                              background: hasNear ? `${COLORS.forest}0F` : COLORS.cream,
+                              border: `1px solid ${hasNear ? COLORS.forest : COLORS.hairline}`,
                               borderLeft: `4px solid ${d.stay?.color || COLORS.forest}`,
                               borderRadius: 10, cursor: 'pointer',
                               fontFamily: "'DM Sans', sans-serif",
                             }}
                           >
-                            <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.charcoal }}>
-                              {d.dayShort} {d.date}
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%' }}>
+                              <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.charcoal }}>
+                                {d.dayShort} {d.date}
+                              </span>
+                              <span style={{ fontSize: 11, color: COLORS.inkLight }}>
+                                {d.label ? `${d.label} · ` : ''}{d.stay?.name}
+                              </span>
+                              <span style={{ marginLeft: 'auto', fontSize: 11, color: COLORS.inkLight }}>
+                                {info.total > 0 ? `${info.total} gepland` : ''}
+                              </span>
                             </span>
-                            <span style={{ fontSize: 11, color: COLORS.inkLight }}>
-                              {d.label ? `${d.label} · ` : ''}{d.stay?.name}
-                            </span>
-                            <span style={{ marginLeft: 'auto', fontSize: 11, color: COLORS.inkLight }}>
-                              {count > 0 ? `${count} gepland` : ''}
-                            </span>
+                            {hasNear && (
+                              <span style={{
+                                display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 2,
+                              }}>
+                                {info.near.slice(0, 4).map(({ act, km }) => {
+                                  const c = CATEGORIES[act.category] || CATEGORIES.custom;
+                                  return (
+                                    <span
+                                      key={act.id}
+                                      style={{
+                                        fontSize: 10.5, padding: '2px 7px', borderRadius: 99,
+                                        background: `${c.color}1F`, color: c.color, fontWeight: 600,
+                                        display: 'inline-flex', alignItems: 'center', gap: 3,
+                                        maxWidth: 150, overflow: 'hidden',
+                                      }}
+                                      title={`${act.name} — ${km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`}`}
+                                    >
+                                      <span>{act.emoji}</span>
+                                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {act.name}
+                                      </span>
+                                      <span style={{ opacity: 0.7 }}>
+                                        {km < 1 ? `${Math.round(km * 1000)} m` : `${Math.round(km)} km`}
+                                      </span>
+                                    </span>
+                                  );
+                                })}
+                                {info.near.length > 4 && (
+                                  <span style={{ fontSize: 10.5, color: COLORS.inkLight, alignSelf: 'center' }}>
+                                    +{info.near.length - 4} meer in de buurt
+                                  </span>
+                                )}
+                              </span>
+                            )}
                           </button>
                         );
                       })}
@@ -3123,6 +3215,7 @@ export default function Planner({ authRequired }) {
           stays={stays}
           days={days}
           plan={plan}
+          activityById={activityById}
           existingNames={new Set(allActivities.map(a => a.name.toLowerCase()))}
           existingCoords={allActivities.filter(a => a.coords).map(a => a.coords)}
           exclusions={suggestExclusions}
