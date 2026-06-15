@@ -20,6 +20,14 @@ function rateLimited() {
   return false;
 }
 
+// Forceer naar een nette string (Geoapify/OSM leveren soms een niet-string)
+function toStr(v) {
+  if (v == null) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number') return String(v);
+  return '';
+}
+
 function haversineKm([lat1, lng1], [lat2, lng2]) {
   const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -113,7 +121,8 @@ async function enrichWithWikipedia(suggestions) {
     .slice(0, 20);
 
   await Promise.allSettled(targets.map(async (s) => {
-    const tag = s.wikipedia;
+    const tag = toStr(s.wikipedia);
+    if (!tag) return;
     const m = /^([a-z]{2,3}):(.+)$/.exec(tag);
     const lang = m ? m[1] : 'en';
     const title = (m ? m[2] : tag).trim().replace(/ /g, '_');
@@ -200,7 +209,7 @@ async function fetchGeoapify(lat, lng, radius, apiKey) {
   const candidates = [];
   for (const f of data.features || []) {
     const p = f.properties || {};
-    const name = (p.name || '').trim();
+    const name = toStr(p.name).trim();
     if (!name) continue;
     const cats = p.categories || [];
     const kind = KINDS.find(k => k.geo(cats));
@@ -211,10 +220,10 @@ async function fetchGeoapify(lat, lng, radius, apiKey) {
     const raw = p.datasource?.raw || {};
     candidates.push({
       name, coords: [cLat, cLng], kind,
-      place: p.city || p.village || p.town || p.address_line2 || null,
-      website: p.website || raw.website || raw['contact:website'] || null,
-      description: raw['description:nl'] || raw.description || null,
-      wikipedia: p.wiki_and_media?.wikipedia || raw.wikipedia || null,
+      place: toStr(p.city || p.village || p.town || p.address_line2) || null,
+      website: toStr(p.website || raw.website || raw['contact:website']) || null,
+      description: toStr(raw['description:nl'] || raw.description) || null,
+      wikipedia: toStr(p.wiki_and_media?.wikipedia || raw.wikipedia) || null,
     });
   }
   return candidates;
@@ -276,7 +285,7 @@ async function fetchOverpass(lat, lng, radius, errors) {
       const candidates = [];
       for (const el of data.elements || []) {
         const tags = el.tags || {};
-        const name = (tags.name || '').trim();
+        const name = toStr(tags.name).trim();
         if (!name) continue;
         const kind = KINDS.find(k => k.osm(tags));
         if (!kind) continue;
@@ -285,10 +294,10 @@ async function fetchOverpass(lat, lng, radius, errors) {
         if (cLat == null || cLng == null) continue;
         candidates.push({
           name, coords: [cLat, cLng], kind,
-          place: tags['addr:city'] || tags['addr:village'] || null,
-          website: tags.website || tags['contact:website'] || null,
-          description: tags['description:nl'] || tags.description || null,
-          wikipedia: tags.wikipedia || null,
+          place: toStr(tags['addr:city'] || tags['addr:village']) || null,
+          website: toStr(tags.website || tags['contact:website']) || null,
+          description: toStr(tags['description:nl'] || tags.description) || null,
+          wikipedia: toStr(tags.wikipedia) || null,
         });
       }
       return candidates;

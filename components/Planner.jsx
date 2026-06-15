@@ -2208,7 +2208,42 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
     });
   };
   const staysWithCoords = stays.filter(s => s.coords);
-  const [stayId, setStayId] = useState(staysWithCoords[0]?.id ?? null);
+
+  // Zoek-ankers: verblijven + alle geplande activiteiten met coördinaten.
+  // Per anker bewaren we waar het vandaan komt zodat we het kunnen groeperen.
+  const plannedAnchors = useMemo(() => {
+    const out = [];
+    const seen = new Set();
+    (days || []).forEach(d => {
+      (plan?.[d.key] || []).forEach(id => {
+        const a = activityById?.[id];
+        if (!a || !a.coords || seen.has(id)) return;
+        seen.add(id);
+        out.push({
+          id: `act:${id}`,
+          name: a.name,
+          emoji: a.emoji || '📍',
+          coords: a.coords,
+          color: (CATEGORIES[a.category] || CATEGORIES.custom).color,
+          dayLabel: `${d.dayShort} ${d.date}`,
+        });
+      });
+    });
+    return out;
+  }, [days, plan, activityById]);
+
+  const anchors = useMemo(() => ([
+    ...staysWithCoords.map(s => ({
+      id: `stay:${s.id}`, name: s.name, emoji: '🏡',
+      coords: s.coords, color: s.color, kind: 'stay',
+    })),
+    ...plannedAnchors.map(a => ({ ...a, kind: 'activity' })),
+  ]), [staysWithCoords, plannedAnchors]);
+
+  const [anchorId, setAnchorId] = useState(null);
+  // Standaard het eerste verblijf; valt terug op eerste anker
+  const effectiveAnchorId = anchorId ?? anchors[0]?.id ?? null;
+  const anchor = anchors.find(a => a.id === effectiveAnchorId) || null;
   // Afstandsbanden: [van, tot] in km
   const BANDS = [[0, 10], [10, 20], [20, 30], [30, 50]];
   const [band, setBand] = useState(BANDS[0]);
@@ -2220,10 +2255,8 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
   const [selected, setSelected] = useState(new Set());
   const [errMsg, setErrMsg] = useState('');
 
-  const stay = staysWithCoords.find(s => s.id === stayId) || null;
-
   const search = async () => {
-    if (!stay) return;
+    if (!anchor) return;
     setState('loading');
     setResults([]);
     setSelected(new Set());
@@ -2232,7 +2265,7 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Family-Pin': getPin() },
         body: JSON.stringify({
-          lat: stay.coords[0], lng: stay.coords[1],
+          lat: anchor.coords[0], lng: anchor.coords[1],
           rMin: band[0] * 1000, rMax: band[1] * 1000,
         }),
       });
@@ -2403,7 +2436,7 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
       category: p.category,
       emoji: p.emoji,
       coords: p.coords,
-      note: [p.label, p.place, `≈ ${p.distKm} km van ${stay?.name ?? 'verblijf'}`]
+      note: [p.label, p.place, `≈ ${p.distKm} km van ${anchor?.name ?? 'startpunt'}`]
         .filter(Boolean).join(' · '),
     })), dayKey);
   };
@@ -2420,25 +2453,70 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
         ) : (
           <>
             <p style={{ fontSize: 13, color: COLORS.inkLight, margin: '0 0 14px', lineHeight: 1.5 }}>
-              Zoekt via OpenStreetMap naar bezienswaardigheden, musea, kastelen,
-              uitkijkpunten, zwemplekken, markten en supermarkten rond je verblijf.
-              Vink aan wat je interessant vindt — die komen in je activiteitenlijst.
+              Zoekt naar bezienswaardigheden, musea, kastelen, uitkijkpunten,
+              zwemplekken, markten en supermarkten rond een verblijf óf rond een
+              activiteit die je al hebt ingepland. Vink aan wat je interessant
+              vindt — die komen in je activiteitenlijst.
             </p>
 
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-              {staysWithCoords.map(s => (
-                <button
-                  key={s.id}
-                  onClick={() => { setStayId(s.id); setState('idle'); setResults([]); }}
-                  style={{
-                    padding: '8px 14px', borderRadius: 99, fontSize: 13, fontWeight: 600,
-                    fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
-                    background: stayId === s.id ? s.color : 'transparent',
-                    color: stayId === s.id ? COLORS.cream : COLORS.ink,
-                    border: `1px solid ${stayId === s.id ? s.color : COLORS.hairline}`,
-                  }}
-                >🏡 {s.name}</button>
-              ))}
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ marginBottom: 4 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: COLORS.inkLight, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+                  Zoek rond een verblijf
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: plannedAnchors.length ? 12 : 0 }}>
+                  {staysWithCoords.map(s => {
+                    const id = `stay:${s.id}`;
+                    const active = effectiveAnchorId === id;
+                    return (
+                      <button
+                        key={id}
+                        onClick={() => { setAnchorId(id); setState('idle'); setResults([]); }}
+                        style={{
+                          padding: '8px 14px', borderRadius: 99, fontSize: 13, fontWeight: 600,
+                          fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
+                          background: active ? s.color : 'transparent',
+                          color: active ? COLORS.cream : COLORS.ink,
+                          border: `1px solid ${active ? s.color : COLORS.hairline}`,
+                        }}
+                      >🏡 {s.name}</button>
+                    );
+                  })}
+                </div>
+
+                {plannedAnchors.length > 0 && (
+                  <>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: COLORS.inkLight, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+                      …of rond een geplande activiteit
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', maxHeight: 132, overflowY: 'auto' }}>
+                      {plannedAnchors.map(a => {
+                        const active = effectiveAnchorId === a.id;
+                        return (
+                          <button
+                            key={a.id}
+                            onClick={() => { setAnchorId(a.id); setState('idle'); setResults([]); }}
+                            title={`${a.name} · ${a.dayLabel}`}
+                            style={{
+                              padding: '7px 12px', borderRadius: 99, fontSize: 12.5, fontWeight: 600,
+                              fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
+                              background: active ? a.color : 'transparent',
+                              color: active ? COLORS.cream : COLORS.ink,
+                              border: `1px solid ${active ? a.color : COLORS.hairline}`,
+                              display: 'inline-flex', alignItems: 'center', gap: 5,
+                              maxWidth: 220,
+                            }}
+                          >
+                            <span>{a.emoji}</span>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+                            <span style={{ opacity: 0.7, fontWeight: 500, fontSize: 11 }}>· {a.dayLabel}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
@@ -2463,7 +2541,7 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
 
             <button
               onClick={search}
-              disabled={state === 'loading' || !stay}
+              disabled={state === 'loading' || !anchor}
               style={{
                 width: '100%', padding: 13,
                 background: state === 'loading' ? COLORS.inkLight : COLORS.forest,
@@ -2476,7 +2554,7 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
             >
               {state === 'loading'
                 ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Omgeving doorzoeken…</>
-                : <><Compass size={16} /> Zoek rond {stay?.name ?? 'verblijf'}</>}
+                : <><Compass size={16} /> Zoek rond {anchor?.name ?? 'startpunt'}</>}
             </button>
 
             {state === 'error' && (
@@ -2519,7 +2597,7 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
 
                 {view === 'map' && (
                   <SuggestionsMap
-                    stay={stay}
+                    stay={anchor}
                     results={mapResults}
                     selected={selected}
                     onToggle={toggle}

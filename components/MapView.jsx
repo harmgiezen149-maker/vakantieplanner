@@ -330,7 +330,7 @@ const FilterBar = ({ days, stays, stayFilter, setStayFilter, dayFilter, setDayFi
 
 // ============ DAY PICKER POPUP (voor toevoegen vanaf kaart) ============
 
-const AddToDaySheet = ({ activity, plan, days, onPick, onClose }) => {
+const AddToDaySheet = ({ activity, plan, days, onPick, onClose, title }) => {
   if (!activity) return null;
   const cat = CATEGORIES[activity.category] || CATEGORIES.custom;
 
@@ -373,7 +373,7 @@ const AddToDaySheet = ({ activity, plan, days, onPick, onClose }) => {
             display: 'flex', alignItems: 'center', gap: 6,
           }}>
             <span style={{ fontSize: 18 }}>{activity.emoji}</span>
-            <span>"{activity.name}" toevoegen aan…</span>
+            <span>{title || `"${activity.name}" toevoegen aan…`}</span>
           </h3>
           <button
             onClick={onClose}
@@ -496,6 +496,8 @@ export default function MapView({ authRequired }) {
 
   // Add-to-day sheet
   const [pendingActivity, setPendingActivity] = useState(null);
+  // Activiteit die we verplaatsen vanaf een specifieke dag: { activity, fromDayKey }
+  const [movingActivity, setMovingActivity] = useState(null);
   const [toast, setToast] = useState(null);
 
   const mapContainerRef = useRef(null);
@@ -665,6 +667,50 @@ export default function MapView({ authRequired }) {
   }, [dayRoutePoints]);
 
   // Voeg activiteit toe aan een dag (vanaf kaart)
+  // Activiteit uit een specifieke dag halen
+  const removeFromDay = async (activityId, dayKey) => {
+    if (!plan) return;
+    const newPlan = {
+      ...plan,
+      [dayKey]: (plan[dayKey] || []).filter(id => id !== activityId),
+    };
+    setPlan(newPlan);
+    setPendingActivity(null);
+    setMovingActivity(null);
+    const act = activityById[activityId];
+    const d = days.find(dd => dd.key === dayKey);
+    setToast(`"${act?.name}" verwijderd uit ${d?.dayShort} ${d?.date}`);
+    setTimeout(() => setToast(null), 2500);
+    try {
+      await savePlan(newPlan, customActivities, locationOverrides, tripConfig);
+    } catch (e) {
+      setToast('⚠️ Niet opgeslagen — controleer verbinding');
+      setTimeout(() => setToast(null), 3500);
+    }
+  };
+
+  // Activiteit van de ene dag naar de andere verplaatsen
+  const moveToDay = async (activityId, fromDayKey, toDayKey) => {
+    if (!plan || fromDayKey === toDayKey) { setMovingActivity(null); return; }
+    const newPlan = {
+      ...plan,
+      [fromDayKey]: (plan[fromDayKey] || []).filter(id => id !== activityId),
+      [toDayKey]: [...(plan[toDayKey] || []).filter(id => id !== activityId), activityId],
+    };
+    setPlan(newPlan);
+    setMovingActivity(null);
+    const act = activityById[activityId];
+    const d = days.find(dd => dd.key === toDayKey);
+    setToast(`"${act?.name}" verplaatst naar ${d?.dayShort} ${d?.date}`);
+    setTimeout(() => setToast(null), 2500);
+    try {
+      await savePlan(newPlan, customActivities, locationOverrides, tripConfig);
+    } catch (e) {
+      setToast('⚠️ Niet opgeslagen — controleer verbinding');
+      setTimeout(() => setToast(null), 3500);
+    }
+  };
+
   const addToDay = async (activityId, dayKey) => {
     if (!plan) return;
     const newPlan = {
@@ -776,6 +822,29 @@ export default function MapView({ authRequired }) {
         ? `<div style="font-size: 11px; color: rgba(31,41,34,0.55); margin-top: 4px;">${activity.note}</div>`
         : '';
 
+      // Op een specifieke dag: knoppen om uit die dag te halen of te verplaatsen
+      const onThisDay = dayFilter !== 'all' && (plan?.[dayFilter] || []).includes(activity.id);
+      const removeId = `rm-${activity.id}`;
+      const moveId = `mv-${activity.id}`;
+      const manageBtns = onThisDay
+        ? `<div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">
+            <button id="${removeId}" style="
+              flex:1; min-width:120px; padding:7px 10px;
+              background:#FAF3E1; color:#B4452F;
+              border:1px solid #E3C4BA; border-radius:8px;
+              font-size:11px; font-weight:600; cursor:pointer;
+              font-family:'DM Sans',sans-serif;
+            ">✕ Uit deze dag halen</button>
+            <button id="${moveId}" style="
+              flex:1; min-width:120px; padding:7px 10px;
+              background:${cat.color}; color:#FAF3E1;
+              border:none; border-radius:8px;
+              font-size:11px; font-weight:600; cursor:pointer;
+              font-family:'DM Sans',sans-serif;
+            ">→ Verplaats naar…</button>
+          </div>`
+        : '';
+
       marker.bindPopup(
         `<div style="font-family: 'DM Sans', sans-serif; min-width: 200px; max-width: 260px;">
           <div style="display:flex; align-items:center; gap:6px; margin-bottom: 4px;">
@@ -785,8 +854,19 @@ export default function MapView({ authRequired }) {
           ${noteHtml}
           <div style="margin-top: 8px;">${dayChips}</div>
           ${mapsBtn}
+          ${manageBtns}
         </div>`
       );
+
+      if (onThisDay) {
+        marker.on('popupopen', () => {
+          const rm = document.getElementById(removeId);
+          if (rm) rm.onclick = () => { marker.closePopup(); removeFromDay(activity.id, dayFilter); };
+          const mv = document.getElementById(moveId);
+          if (mv) mv.onclick = () => { marker.closePopup(); setMovingActivity({ activity, fromDayKey: dayFilter }); };
+        });
+      }
+
       markersRef.current.push(marker);
     });
 
@@ -802,6 +882,10 @@ export default function MapView({ authRequired }) {
           : '';
 
         const popupId = `add-${activity.id}`;
+        const activeDay = dayFilter !== 'all' ? days.find(d => d.key === dayFilter) : null;
+        const addLabel = activeDay
+          ? `+ Inplannen op ${activeDay.dayShort} ${activeDay.date}`
+          : '+ Inplannen';
         const mapsLink = getMapsLink(activity);
         const mapsBtn = mapsLink
           ? `<a href="${mapsLink}" target="_blank" rel="noopener noreferrer"
@@ -847,7 +931,7 @@ export default function MapView({ authRequired }) {
                   font-size: 11px; font-weight: 600;
                   cursor: pointer;
                   font-family: 'DM Sans', sans-serif;
-                ">+ Inplannen</button>
+                ">${addLabel}</button>
               ${mapsBtn}
             </div>
           </div>`
@@ -859,7 +943,13 @@ export default function MapView({ authRequired }) {
           if (btn) {
             btn.onclick = () => {
               marker.closePopup();
-              setPendingActivity(activity);
+              // Staat de kaart op één specifieke dag? Dan meteen op die dag
+              // inplannen — geen dubbele dagkeuze nodig.
+              if (dayFilter !== 'all' && plan && !(plan[dayFilter] || []).includes(activity.id)) {
+                addToDay(activity.id, dayFilter);
+              } else {
+                setPendingActivity(activity);
+              }
             };
           }
         });
@@ -1068,6 +1158,17 @@ export default function MapView({ authRequired }) {
           days={days}
           onPick={(dayKey) => addToDay(pendingActivity.id, dayKey)}
           onClose={() => setPendingActivity(null)}
+        />
+      )}
+
+      {movingActivity && (
+        <AddToDaySheet
+          activity={movingActivity.activity}
+          plan={plan}
+          days={days.filter(d => d.key !== movingActivity.fromDayKey)}
+          title="Verplaats naar welke dag?"
+          onPick={(dayKey) => moveToDay(movingActivity.activity.id, movingActivity.fromDayKey, dayKey)}
+          onClose={() => setMovingActivity(null)}
         />
       )}
       </>)}
