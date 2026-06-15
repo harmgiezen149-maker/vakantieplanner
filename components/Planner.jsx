@@ -614,7 +614,8 @@ const chipEditInput = {
 
 // ============ DAY CARD ============
 
-const DayCard = ({ day, days: allDays, activities, activityById, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay }) => {
+const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay, onSwapDay }) => {
+  const [swapping, setSwapping] = useState(false);
   const hasActivities = activities.length > 0;
   const stay = day.stay;
 
@@ -677,7 +678,58 @@ const DayCard = ({ day, days: allDays, activities, activityById, onAddClick, onR
             background: 'rgba(58, 126, 132, 0.10)', borderRadius: 99,
           }}>{day.label}</div>
         )}
+        {hasActivities && (
+          <button
+            onClick={() => setSwapping(s => !s)}
+            title="Wissel deze dag met een andere dag"
+            style={{
+              marginLeft: day.label ? 8 : 'auto',
+              border: `1px solid ${swapping ? COLORS.forest : COLORS.hairline}`,
+              background: swapping ? `${COLORS.forest}12` : 'transparent',
+              color: swapping ? COLORS.forest : COLORS.inkLight,
+              borderRadius: 99, padding: '4px 10px', cursor: 'pointer',
+              fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600,
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+            }}
+          >
+            <RefreshCw size={12} /> Wissel dag
+          </button>
+        )}
       </div>
+
+      {swapping && (
+        <div style={{
+          marginBottom: 12, padding: 12,
+          background: COLORS.cream, borderRadius: 12,
+          border: `1px solid ${COLORS.hairline}`,
+        }}>
+          <div style={{ fontSize: 12, color: COLORS.ink, marginBottom: 8 }}>
+            Verwissel alle activiteiten van <strong>{day.dayShort} {day.date}</strong> met:
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {allDays.filter(d => d.key !== day.key).map(d => {
+              const cnt = (planRef?.[d.key] || []).length;
+              return (
+                <button
+                  key={d.key}
+                  onClick={() => { onSwapDay(day.key, d.key); setSwapping(false); }}
+                  style={{
+                    padding: '6px 10px', borderRadius: 99,
+                    fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
+                    fontFamily: "'DM Sans', sans-serif",
+                    background: 'transparent', color: COLORS.charcoal,
+                    border: `1px solid ${COLORS.hairline}`,
+                    borderLeft: `4px solid ${d.stay?.color || COLORS.forest}`,
+                  }}
+                >
+                  {d.dayShort} {d.date}
+                  <span style={{ opacity: 0.6, fontWeight: 500 }}> · {cnt}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Route-totaal: tonen als er activiteiten met coords zijn */}
       {hasActivities && route && route.totalDistance > 0 && (
@@ -779,7 +831,7 @@ const DayCard = ({ day, days: allDays, activities, activityById, onAddClick, onR
 
 // ============ PLAN VIEW ============
 
-const PlanView = ({ days, plan, activityById, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay, onOpenTripSettings }) => {
+const PlanView = ({ days, plan, activityById, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay, onSwapDay, onOpenTripSettings }) => {
   if (days.length === 0) {
     return (
       <div style={{ padding: '40px 20px 100px', textAlign: 'center' }}>
@@ -813,11 +865,13 @@ const PlanView = ({ days, plan, activityById, onAddClick, onRemove, onEditLocati
           days={days}
           activities={plan[day.key] || []}
           activityById={activityById}
+          plan={plan}
           onAddClick={onAddClick}
           onRemove={onRemove}
           onEditLocation={onEditLocation}
           onUpdateProps={onUpdateProps}
           onMoveToDay={onMoveToDay}
+          onSwapDay={onSwapDay}
           onMove={onMove}
         />
       ))}
@@ -2396,11 +2450,42 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
   const [band, setBand] = useState(BANDS[0]);
   const [state, setState] = useState('idle'); // idle | loading | done | error
   const [view, setView] = useState('list'); // list | map
+  const [mode, setMode] = useState('sights'); // sights | hiking
   // Categoriefilter: lege set = alles tonen
   const [catFilter, setCatFilter] = useState(new Set());
   const [results, setResults] = useState([]);
+  const [hikes, setHikes] = useState([]);
   const [selected, setSelected] = useState(new Set());
   const [errMsg, setErrMsg] = useState('');
+
+  const searchHiking = async () => {
+    if (!anchor) return;
+    setState('loading');
+    setHikes([]);
+    try {
+      const res = await fetch('/api/hiking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Family-Pin': getPin() },
+        body: JSON.stringify({
+          lat: anchor.coords[0], lng: anchor.coords[1],
+          rMin: band[0] * 1000, rMax: band[1] * 1000,
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        if (d.error === 'rate_limited') throw new Error('Even te veel aanvragen — probeer het over een minuut opnieuw.');
+        throw new Error('Wandelroutes ophalen mislukt. De OpenStreetMap-servers zijn soms traag; probeer het zo nog eens.');
+      }
+      const data = await res.json();
+      const existing = new Set(existingNames);
+      const fresh = (data.routes || []).filter(r => !existing.has(r.name.toLowerCase()));
+      setHikes(fresh);
+      setState('done');
+    } catch (e) {
+      setErrMsg(e.message);
+      setState('error');
+    }
+  };
 
   const search = async () => {
     if (!anchor) return;
@@ -2588,6 +2673,28 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
     })), dayKey);
   };
 
+  // Eén wandelroute toevoegen aan de activiteitenlijst
+  const addHike = (h) => {
+    const parts = [];
+    if (h.lengthKm) parts.push(`${h.lengthKm} km`);
+    if (h.durationMin) {
+      const u = Math.floor(h.durationMin / 60);
+      const m = h.durationMin % 60;
+      parts.push(`≈ ${u > 0 ? `${u}u ` : ''}${m}min lopen`);
+    }
+    if (h.roundtrip) parts.push('rondwandeling');
+    parts.push(`start ≈ ${h.distKm} km van ${anchor?.name ?? 'startpunt'}`);
+    onAdd([{
+      name: h.name,
+      category: 'hiking',
+      emoji: '🥾',
+      coords: h.coords,
+      note: parts.join(' · '),
+    }], null, { keepOpen: true });
+    // Haal de toegevoegde route uit de lijst zodat je voortgang ziet
+    setHikes(hs => hs.filter(x => x !== h));
+  };
+
   return (
     <Sheet onClose={onClose} title="Ontdek de omgeving">
       <div style={{ padding: '16px 20px 24px' }}>
@@ -2599,11 +2706,28 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
           </div>
         ) : (
           <>
+            <div style={{
+              display: 'flex', gap: 0, marginBottom: 14,
+              border: `1px solid ${COLORS.hairline}`, borderRadius: 10, overflow: 'hidden',
+            }}>
+              {[['sights', '📍 Bezienswaardigheden'], ['hiking', '🥾 Wandelroutes']].map(([key, lbl]) => (
+                <button
+                  key={key}
+                  onClick={() => { setMode(key); setState('idle'); }}
+                  style={{
+                    flex: 1, padding: '10px 0', border: 'none', cursor: 'pointer',
+                    fontFamily: "'DM Sans', sans-serif", fontSize: 12.5, fontWeight: 600,
+                    background: mode === key ? COLORS.forest : 'transparent',
+                    color: mode === key ? COLORS.cream : COLORS.ink,
+                  }}
+                >{lbl}</button>
+              ))}
+            </div>
+
             <p style={{ fontSize: 13, color: COLORS.inkLight, margin: '0 0 14px', lineHeight: 1.5 }}>
-              Zoekt naar bezienswaardigheden, musea, kastelen, uitkijkpunten,
-              zwemplekken, markten en supermarkten rond een verblijf óf rond een
-              activiteit die je al hebt ingepland. Vink aan wat je interessant
-              vindt — die komen in je activiteitenlijst.
+              {mode === 'hiking'
+                ? 'Zoekt gemarkeerde wandelroutes uit OpenStreetMap rond een verblijf óf een geplande activiteit, met lengte en geschatte wandeltijd.'
+                : 'Zoekt naar bezienswaardigheden, musea, kastelen, uitkijkpunten, zwemplekken, markten en supermarkten rond een verblijf óf een geplande activiteit. Vink aan wat je interessant vindt.'}
             </p>
 
             <div style={{ marginBottom: 10 }}>
@@ -2737,7 +2861,7 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
             </div>
 
             <button
-              onClick={search}
+              onClick={mode === 'hiking' ? searchHiking : search}
               disabled={state === 'loading' || !anchor}
               style={{
                 width: '100%', padding: 13,
@@ -2750,8 +2874,8 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
               }}
             >
               {state === 'loading'
-                ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Omgeving doorzoeken…</>
-                : <><Compass size={16} /> Zoek rond {anchor?.name ?? 'startpunt'}</>}
+                ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> {mode === 'hiking' ? 'Wandelroutes zoeken…' : 'Omgeving doorzoeken…'}</>
+                : <><Compass size={16} /> {mode === 'hiking' ? 'Wandelroutes rond' : 'Zoek rond'} {anchor?.name ?? 'startpunt'}</>}
             </button>
 
             {state === 'error' && (
@@ -2762,14 +2886,97 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
               }}>{errMsg}</div>
             )}
 
-            {state === 'done' && results.length === 0 && (
+            {/* Wandelroutes-resultaten */}
+            {mode === 'hiking' && state === 'done' && hikes.length === 0 && (
+              <div style={{ fontSize: 13, color: COLORS.inkLight }}>
+                Geen gemarkeerde wandelroutes gevonden tussen {band[0]} en {band[1]} km.
+                Niet elke route staat in OpenStreetMap — probeer een andere
+                afstandsband of een ander startpunt.
+              </div>
+            )}
+
+            {mode === 'hiking' && hikes.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {hikes.map((h, i) => (
+                  <div
+                    key={`${h.name}-${i}`}
+                    style={{
+                      padding: '12px 14px', background: COLORS.creamSoft,
+                      border: `1px solid ${COLORS.hairline}`,
+                      borderLeft: `4px solid ${CATEGORIES.hiking?.color || COLORS.forest}`,
+                      borderRadius: 12,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                      <span style={{ fontSize: 18 }}>🥾</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: COLORS.charcoal }}>
+                          {h.name}
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 5 }}>
+                          {h.lengthKm != null && (
+                            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: `${COLORS.forest}1A`, color: COLORS.forest }}>
+                              📏 {h.lengthKm} km
+                            </span>
+                          )}
+                          {h.durationMin != null && (
+                            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: `${COLORS.lake}1A`, color: COLORS.lake }}>
+                              ⏱ {Math.floor(h.durationMin / 60) > 0 ? `${Math.floor(h.durationMin / 60)}u ` : ''}{h.durationMin % 60}min
+                            </span>
+                          )}
+                          {h.roundtrip && (
+                            <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 99, background: COLORS.cream, color: COLORS.inkLight, border: `1px solid ${COLORS.hairline}` }}>
+                              ↺ rondwandeling
+                            </span>
+                          )}
+                          <span style={{ fontSize: 11, color: COLORS.inkLight, alignSelf: 'center' }}>
+                            start ≈ {h.distKm} km
+                          </span>
+                        </div>
+                        {h.lengthKm == null && (
+                          <div style={{ fontSize: 10.5, color: COLORS.inkLight, marginTop: 4, fontStyle: 'italic' }}>
+                            lengte niet bekend in OpenStreetMap
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                      <button
+                        onClick={() => addHike(h)}
+                        style={{
+                          flex: 1, padding: '9px 12px', border: 'none', borderRadius: 9,
+                          background: COLORS.forest, color: COLORS.cream,
+                          fontSize: 12.5, fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
+                          cursor: 'pointer',
+                        }}
+                      >+ Toevoegen aan activiteiten</button>
+                      <a
+                        href={h.website || `https://www.google.com/maps/search/?api=1&query=${h.coords[0]},${h.coords[1]}`}
+                        target="_blank" rel="noopener noreferrer"
+                        style={{
+                          padding: '9px 12px', borderRadius: 9,
+                          border: `1px solid ${COLORS.hairline}`,
+                          color: COLORS.forest, fontSize: 12.5, fontWeight: 600,
+                          textDecoration: 'none', whiteSpace: 'nowrap',
+                        }}
+                      >{h.website ? 'Website ↗' : 'Maps ↗'}</a>
+                    </div>
+                  </div>
+                ))}
+                <div style={{ fontSize: 11, color: COLORS.inkLight, marginTop: 2, lineHeight: 1.5 }}>
+                  Wandeltijd is een schatting op ~4,5 km/u en houdt geen rekening met hoogteverschil.
+                </div>
+              </div>
+            )}
+
+            {mode === 'sights' && state === 'done' && results.length === 0 && (
               <div style={{ fontSize: 13, color: COLORS.inkLight }}>
                 Niets nieuws gevonden tussen {band[0]} en {band[1]} km. Probeer een
                 andere afstandsband, of voeg zelf activiteiten toe.
               </div>
             )}
 
-            {results.length > 0 && (
+            {mode === 'sights' && results.length > 0 && (
               <>
                 <div style={{ marginBottom: 10 }}>{catChips}</div>
 
@@ -3298,6 +3505,16 @@ export default function Planner({ authRequired }) {
     });
   };
 
+  // Alle activiteiten van twee dagen omwisselen
+  const swapDays = (dayA, dayB) => {
+    if (dayA === dayB) return;
+    setPlan(p => ({
+      ...p,
+      [dayA]: [...(p[dayB] || [])],
+      [dayB]: [...(p[dayA] || [])],
+    }));
+  };
+
   // Eigenschap van een activiteit aanpassen (naam/note/important).
   // Custom activities worden direct gewijzigd; standaard-activiteiten via
   // het overrides-mechanisme, zodat de wijziging overal doorwerkt.
@@ -3437,6 +3654,7 @@ export default function Planner({ authRequired }) {
             onMove={moveInDay}
             onUpdateProps={updateActivityProps}
             onMoveToDay={moveActivityToDay}
+            onSwapDay={swapDays}
             onOpenTripSettings={() => setSheet({ type: 'trip-settings' })}
           />
         ) : (
@@ -3517,7 +3735,7 @@ export default function Planner({ authRequired }) {
               custom: true,
             }]);
           }}
-          onAdd={(picked, dayKey) => {
+          onAdd={(picked, dayKey, opts) => {
             const ts = Date.now();
             const newActs = picked.map((p, i) => ({
               id: `sugg_${ts}_${i}`,
@@ -3535,7 +3753,7 @@ export default function Planner({ authRequired }) {
                 [dayKey]: [...(prev?.[dayKey] || []), ...newActs.map(a => a.id)],
               }));
             }
-            setSheet(null);
+            if (!opts?.keepOpen) setSheet(null);
           }}
           onClose={() => setSheet(null)}
         />
