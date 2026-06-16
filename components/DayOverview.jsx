@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Car } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Car, Download } from 'lucide-react';
 import {
   COLORS, CATEGORIES, DEFAULT_ACTIVITIES,
   DEFAULT_TRIP_CONFIG, buildDays, staysWithColors,
@@ -14,6 +14,45 @@ const getPin = () => {
   if (typeof window === 'undefined') return '';
   return localStorage.getItem('planner-pin') || '';
 };
+
+// Bouw een GPX-bestand uit de route-geometrie en download het.
+function buildGpx(act) {
+  const pts = act.routeGeometry || [];
+  const esc = (s) => String(s).replace(/[<>&'"]/g, c => (
+    { '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]
+  ));
+  const name = esc(act.name || 'Wandelroute');
+  const trkpts = pts.map(([lat, lng]) => `      <trkpt lat="${lat}" lon="${lng}"></trkpt>`).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Vakantieplanner" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata><name>${name}</name></metadata>
+  <trk>
+    <name>${name}</name>
+    <trkseg>
+${trkpts}
+    </trkseg>
+  </trk>
+</gpx>`;
+}
+
+function downloadGpx(act) {
+  try {
+    const gpx = buildGpx(act);
+    const blob = new Blob([gpx], { type: 'application/gpx+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const safe = (act.name || 'wandelroute')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+    a.href = url;
+    a.download = `${safe || 'wandelroute'}.gpx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) {
+    window.alert('Kon het GPX-bestand niet maken.');
+  }
+}
 
 async function fetchPlan() {
   const res = await fetch('/api/plan', {
@@ -484,6 +523,20 @@ export default function DayOverview() {
                                 display: 'flex', alignItems: 'center', padding: 4,
                               }}
                             ><ExternalLink size={16} /></a>
+                          )}
+                          {Array.isArray(act.routeGeometry) && act.routeGeometry.length > 1 && (
+                            <button
+                              onClick={() => downloadGpx(act)}
+                              aria-label="Download GPX"
+                              title="Download als GPX (voor je wandel-app of GPS)"
+                              style={{
+                                color: cat.color, flexShrink: 0,
+                                display: 'flex', alignItems: 'center', gap: 3,
+                                background: 'transparent', border: 'none', cursor: 'pointer',
+                                padding: 4, fontFamily: "'DM Sans', sans-serif",
+                                fontSize: 11, fontWeight: 600,
+                              }}
+                            ><Download size={16} /> GPX</button>
                           )}
                         </div>
                       </div>

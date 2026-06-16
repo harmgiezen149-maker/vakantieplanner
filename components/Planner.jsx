@@ -2836,6 +2836,35 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
     return out.map(p => [Math.round(p[0] * 1e5) / 1e5, Math.round(p[1] * 1e5) / 1e5]);
   };
 
+  // GPX downloaden van een gevonden route (vóór toevoegen)
+  const downloadHikeGpx = (h) => {
+    try {
+      const flat = [];
+      (h.segments || []).forEach(seg => seg.forEach(p => flat.push(p)));
+      if (flat.length < 2) { window.alert('Geen routelijn beschikbaar voor GPX.'); return; }
+      const esc = (s) => String(s).replace(/[<>&'"]/g, c => (
+        { '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
+      const name = esc(h.name || 'Wandelroute');
+      const trkpts = flat.map(([lat, lng]) => `      <trkpt lat="${lat}" lon="${lng}"></trkpt>`).join('\n');
+      const gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Vakantieplanner" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata><name>${name}</name></metadata>
+  <trk><name>${name}</name><trkseg>
+${trkpts}
+  </trkseg></trk>
+</gpx>`;
+      const blob = new Blob([gpx], { type: 'application/gpx+xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const safe = (h.name || 'wandelroute').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+      a.href = url; a.download = `${safe || 'wandelroute'}.gpx`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      window.alert('Kon het GPX-bestand niet maken.');
+    }
+  };
+
   const addHike = (h) => {
     const parts = [];
     if (h.lengthKm) parts.push(`${h.lengthKm} km`);
@@ -3165,6 +3194,20 @@ const SuggestionsSheet = ({ stays, days, plan, activityById, existingNames, exis
                           display: 'flex', alignItems: 'center',
                         }}
                       >{h.website ? 'Website ↗' : 'Maps ↗'}</a>
+                      {h.segments && h.segments.length > 0 && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); downloadHikeGpx(h); }}
+                          title="Download als GPX"
+                          style={{
+                            padding: '9px 12px', borderRadius: 9,
+                            border: `1px solid ${COLORS.hairline}`,
+                            background: 'transparent', color: COLORS.forest,
+                            fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                            fontFamily: "'DM Sans', sans-serif",
+                            display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
+                          }}
+                        >GPX ↓</button>
+                      )}
                     </div>
                   </div>
                 ))}
