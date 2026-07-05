@@ -959,7 +959,7 @@ const LibraryActivity = ({ activity, usedInDays, onAddClick, onDelete, onEditLoc
   );
 };
 
-const LibraryView = ({ activities, plan, onAddClick, onCreateCustom, onDeleteCustom, onEditLocation, onOpenSuggestions }) => {
+const LibraryView = ({ activities, plan, onAddClick, onCreateCustom, onDeleteCustom, onEditLocation, onOpenSuggestions, onPasteLink }) => {
   const planUsage = useMemo(() => {
     const usage = {};
     Object.values(plan).flat().forEach(id => { usage[id] = (usage[id] || 0) + 1; });
@@ -1000,11 +1000,25 @@ const LibraryView = ({ activities, plan, onAddClick, onCreateCustom, onDeleteCus
           borderRadius: 12, fontSize: 14, fontFamily: "'DM Sans', sans-serif",
           fontWeight: 600, cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-          marginBottom: 24,
+          marginBottom: 10,
           boxShadow: '0 2px 8px rgba(201, 125, 93, 0.25)',
         }}
       >
         <Sparkles size={16} /> Eigen activiteit toevoegen
+      </button>
+      <button
+        onClick={onPasteLink}
+        style={{
+          width: '100%', padding: 13,
+          background: 'transparent', color: COLORS.forest,
+          border: `1px solid ${COLORS.forest}`,
+          borderRadius: 12, fontSize: 13.5, fontFamily: "'DM Sans', sans-serif",
+          fontWeight: 600, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          marginBottom: 24,
+        }}
+      >
+        <MapPin size={15} /> Plak een Google Maps-link
       </button>
 
       {CATEGORY_ORDER.map(catKey => {
@@ -1944,6 +1958,138 @@ const ConfirmSheet = ({ title, message, confirmText, onConfirm, onClose }) => (
 );
 
 // ============ "WAT LIGT HIER?" (klik op de kaart) ============
+
+// ============ GOOGLE MAPS-LINK PLAKKEN ============
+
+const PasteLinkSheet = ({ onCreate, onClose }) => {
+  const [url, setUrl] = useState('');
+  const [state, setState] = useState('idle'); // idle | loading | preview | error
+  const [preview, setPreview] = useState(null);
+  const [errMsg, setErrMsg] = useState('');
+
+  const resolve = async (value) => {
+    const v = (value ?? url).trim();
+    if (!v) return;
+    setState('loading');
+    setErrMsg('');
+    try {
+      let data = null;
+      const direct = parseMapsUrlClient(v);
+      if (direct.coords) {
+        data = { name: direct.name, coords: direct.coords, description: null };
+      } else if (isGoogleMapsUrl(v)) {
+        data = await apiResolveMaps(v);
+      } else {
+        throw new Error('geen Maps-link');
+      }
+      if (!data?.coords) throw new Error('geen locatie gevonden');
+      setPreview({
+        name: data.name || 'Nieuwe activiteit',
+        coords: data.coords,
+        description: data.description || null,
+      });
+      setState('preview');
+    } catch (e) {
+      setErrMsg('Kon deze link niet uitlezen. Plak de volledige Google Maps-link van een plek (via Delen → Link kopiëren), of de coördinaten.');
+      setState('error');
+    }
+  };
+
+  const confirm = () => {
+    onCreate({ name: preview.name, coords: preview.coords, note: preview.description });
+  };
+
+  return (
+    <Sheet onClose={onClose} title="Google Maps-link toevoegen">
+      <div style={{ padding: '14px 20px 24px' }}>
+        <p style={{ fontSize: 13, color: COLORS.inkLight, margin: '0 0 12px', lineHeight: 1.5 }}>
+          Plak een Google Maps-link van een plek (in Google Maps: <strong>Delen → Link kopiëren</strong>).
+          De app maakt er automatisch een activiteit van met naam en locatie.
+        </p>
+
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') resolve(); }}
+            placeholder="https://maps.app.goo.gl/…"
+            autoFocus
+            style={{
+              flex: 1, fontFamily: "'DM Sans', sans-serif", fontSize: 14,
+              padding: '11px 12px', border: `1px solid ${COLORS.hairline}`,
+              borderRadius: 10, background: COLORS.cream, color: COLORS.charcoal,
+            }}
+          />
+          <button
+            onClick={() => resolve()}
+            disabled={state === 'loading' || !url.trim()}
+            style={{
+              padding: '0 16px', background: COLORS.forest, color: COLORS.cream,
+              border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600,
+              fontFamily: "'DM Sans', sans-serif",
+              cursor: state === 'loading' ? 'wait' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+            }}
+          >
+            {state === 'loading'
+              ? <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} />
+              : 'Uitlezen'}
+          </button>
+        </div>
+
+        {state === 'error' && (
+          <div style={{
+            padding: 12, borderRadius: 10, fontSize: 13, lineHeight: 1.5,
+            background: 'rgba(201, 125, 93, 0.12)', color: COLORS.sunset,
+          }}>{errMsg}</div>
+        )}
+
+        {state === 'preview' && preview && (
+          <div style={{
+            padding: 14, borderRadius: 12, background: COLORS.creamSoft,
+            border: `1px solid ${COLORS.hairline}`,
+          }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.inkLight, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Naam</label>
+            <input
+              value={preview.name}
+              onChange={(e) => setPreview(p => ({ ...p, name: e.target.value }))}
+              style={{
+                width: '100%', boxSizing: 'border-box', marginTop: 4, marginBottom: 10,
+                fontFamily: "'DM Sans', sans-serif", fontSize: 14, padding: '9px 11px',
+                border: `1px solid ${COLORS.hairline}`, borderRadius: 9,
+                background: COLORS.cream, color: COLORS.charcoal,
+              }}
+            />
+            <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.inkLight, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Beschrijving</label>
+            <textarea
+              value={preview.description || ''}
+              onChange={(e) => setPreview(p => ({ ...p, description: e.target.value }))}
+              placeholder="Optioneel"
+              style={{
+                width: '100%', boxSizing: 'border-box', marginTop: 4, marginBottom: 10,
+                minHeight: 50, resize: 'vertical',
+                fontFamily: "'DM Sans', sans-serif", fontSize: 14, padding: '9px 11px',
+                border: `1px solid ${COLORS.hairline}`, borderRadius: 9,
+                background: COLORS.cream, color: COLORS.charcoal,
+              }}
+            />
+            <div style={{ fontSize: 11, color: COLORS.inkLight, marginBottom: 12 }}>
+              📍 {preview.coords[0].toFixed(5)}, {preview.coords[1].toFixed(5)}
+            </div>
+            <button
+              onClick={confirm}
+              style={{
+                width: '100%', padding: 13, background: COLORS.forest, color: COLORS.cream,
+                border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 600,
+                fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
+              }}
+            >+ Toevoegen aan activiteiten</button>
+          </div>
+        )}
+      </div>
+    </Sheet>
+  );
+};
 
 const WhatsHereSheet = ({ point, onCreate, onClose }) => {
   const [state, setState] = useState('loading');
@@ -3916,6 +4062,7 @@ export default function Planner({ authRequired }) {
             onDeleteCustom={deleteCustom}
             onEditLocation={(act) => setSheet({ type: 'edit-location', activityId: act.id })}
             onOpenSuggestions={() => setSheet({ type: 'suggestions' })}
+            onPasteLink={() => setSheet({ type: 'paste-link' })}
           />
         )}
 
@@ -4005,6 +4152,20 @@ export default function Planner({ authRequired }) {
               }));
             }
             if (!opts?.keepOpen) setSheet(null);
+          }}
+          onClose={() => setSheet(null)}
+        />
+      )}
+
+      {sheet?.type === 'paste-link' && (
+        <PasteLinkSheet
+          onCreate={(act) => {
+            const id = `custom_${Date.now()}`;
+            setCustomActivities(cs => [...cs, {
+              id, name: act.name, category: 'custom', emoji: '📍',
+              coords: act.coords, note: act.note || null, custom: true,
+            }]);
+            setSheet(null);
           }}
           onClose={() => setSheet(null)}
         />

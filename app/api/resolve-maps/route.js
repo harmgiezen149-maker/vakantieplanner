@@ -108,5 +108,27 @@ export async function POST(request) {
   if (!coords) {
     return Response.json({ error: 'no_coords_found', finalUrl }, { status: 422 });
   }
-  return Response.json({ name, coords, finalUrl });
+
+  // Verrijk met een omschrijving (type + plaats) via reverse-geocoding
+  let description = null;
+  let resolvedName = name;
+  try {
+    const rev = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${coords[0]}&lon=${coords[1]}&zoom=18&addressdetails=1`,
+      { headers: { 'User-Agent': 'VakantiePlanner/1.0 (familie-vakantieplanner)' }, signal: AbortSignal.timeout(8_000) },
+    );
+    if (rev.ok) {
+      const d = await rev.json();
+      const a = d.address || {};
+      const place = a.village || a.town || a.city || a.hamlet || a.municipality || null;
+      const typ = d.type ? String(d.type).replace(/_/g, ' ') : null;
+      description = [typ, place].filter(Boolean).join(' · ') || null;
+      // Als de URL geen naam gaf, gebruik de Nominatim-naam
+      if (!resolvedName && d.name) resolvedName = String(d.name).slice(0, 80);
+    }
+  } catch {
+    // omschrijving is optioneel
+  }
+
+  return Response.json({ name: resolvedName, coords, description, finalUrl });
 }
