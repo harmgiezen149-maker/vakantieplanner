@@ -1,0 +1,797 @@
+'use client';
+
+import { useEffect, useState, useRef, useCallback } from 'react';
+
+// Unieke id-generator (geen externe dependency nodig)
+const uid = () =>
+  Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+export default function PackingList() {
+  const [categories, setCategories] = useState([]);
+  const [items, setItems] = useState([]);
+  const [updatedBy, setUpdatedBy] = useState(null);
+  const [updatedAt, setUpdatedAt] = useState(null);
+  const [name, setName] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const [newCat, setNewCat] = useState('');
+  const [draftItem, setDraftItem] = useState({}); // { [catId]: { label, qty } }
+
+  // Filters (alleen visueel, raken de opgeslagen data niet)
+  const [catFilter, setCatFilter] = useState([]); // lege array = alle categorieën
+  const [hideChecked, setHideChecked] = useState(false);
+
+  // Persoonlijke pagina: /inpakken?cat=<id> toont één categorie
+  const [soloCat, setSoloCat] = useState(null);
+  // Welk item heeft zijn bewerk-/notitiepaneel open
+  const [expandedItem, setExpandedItem] = useState(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setSoloCat(params.get('cat'));
+  }, []);
+
+  const saveTimer = useRef(null);
+  // Houd de laatste staat vast zodat de debounced save altijd het nieuwste pakt
+  const latest = useRef({ categories: [], items: [] });
+  // True zolang er een lokale wijziging nog niet (volledig) is opgeslagen.
+  // Voorkomt dat de focus-refresh (die o.a. vuurt na een confirm-popup)
+  // de lokale wijziging overschrijft met oude serverdata.
+  const dirty = useRef(false);
+
+  const load = useCallback(async () => {
+    if (dirty.current) return;
+    try {
+      const res = await fetch('/api/inpakken');
+      const data = await res.json();
+      setCategories(data.categories ?? []);
+      setItems(data.items ?? []);
+      setUpdatedBy(data.updatedBy ?? null);
+      setUpdatedAt(data.updatedAt ?? null);
+      latest.current = { categories: data.categories ?? [], items: data.items ?? [] };
+    } catch {
+      // stil falen
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [load]);
+
+  // Centrale opslag: debounced, gebruikt altijd de meest recente ref-waarden
+  const persist = useCallback((nextCats, nextItems) => {
+    latest.current = { categories: nextCats, items: nextItems };
+    dirty.current = true;
+    clearTimeout(saveTimer.current);
+    setSaving(true);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/inpakken', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            categories: latest.current.categories,
+            items: latest.current.items,
+            updatedBy: name || null,
+          }),
+        });
+        const data = await res.json();
+        setUpdatedBy(data.updatedBy ?? null);
+        setUpdatedAt(data.updatedAt ?? null);
+        dirty.current = false;
+      } catch {
+        // negeer; volgende wijziging probeert opnieuw (dirty blijft staan)
+      } finally {
+        setSaving(false);
+      }
+    }, 600);
+  }, [name]);
+
+  // Helper die state + opslag in één keer bijwerkt
+  const apply = (nextCats, nextItems) => {
+    setCategories(nextCats);
+    setItems(nextItems);
+    persist(nextCats, nextItems);
+  };
+
+  // ── Categorie-acties ───────────────────────────────────────────────
+  const addCategory = () => {
+    const n = newCat.trim();
+    if (!n) return;
+    apply([...categories, { id: uid(), name: n.slice(0, 40) }], items);
+    setNewCat('');
+  };
+
+  const removeCategory = (catId) => {
+    const cat = categories.find((c) => c.id === catId);
+    const count = items.filter((it) => it.categoryId === catId).length;
+    const naam = cat ? `“${cat.name}”` : 'deze categorie';
+    const itemTekst =
+      count === 0
+        ? 'Deze categorie is leeg.'
+        : count === 1
+          ? 'Hiermee verdwijnt ook 1 item.'
+          : `Hiermee verdwijnen ook ${count} items.`;
+    if (!window.confirm(`Categorie ${naam} verwijderen?\n\n${itemTekst}\n\nDit kan niet ongedaan worden gemaakt.`)) {
+      return;
+    }
+    apply(
+      categories.filter((c) => c.id !== catId),
+      items.filter((it) => it.categoryId !== catId),
+    );
+    setCatFilter((f) => f.filter((id) => id !== catId));
+  };
+
+  // Categorie hernoemen. Krijgt de nieuwe naam (genormaliseerd) al een
+  // bestaande categorie? Dan samenvoegen: items verhuizen, lege cat weg.
+  const renameCategory = (catId, rawName) => {
+    const name = rawName.trim().slice(0, 40);
+    if (!name) return;
+    const target = categories.find(
+      (c) => c.id !== catId && c.name.toLowerCase() === name.toLowerCase());
+
+    if (target) {
+      if (!window.confirm(`Er bestaat al een categorie “${target.name}”. Samenvoegen?\n\nDe items uit deze categorie verhuizen ernaartoe.`)) {
+        return;
+      }
+      apply(
+        categories.filter((c) => c.id !== catId),
+        items.map((it) => it.categoryId === catId ? { ...it, categoryId: target.id } : it),
+      );
+      setCatFilter((f) => f.filter((id) => id !== catId));
+    } else {
+      apply(
+        categories.map((c) => c.id === catId ? { ...c, name } : c),
+        items,
+      );
+    }
+  };
+
+  const toggleCatFilter = (catId) =>
+    setCatFilter((f) => (f.includes(catId) ? f.filter((id) => id !== catId) : [...f, catId]));
+
+  const moveCategory = (catId, dir) => {
+    const idx = categories.findIndex((c) => c.id === catId);
+    const target = idx + dir;
+    if (idx < 0 || target < 0 || target >= categories.length) return;
+    const next = [...categories];
+    [next[idx], next[target]] = [next[target], next[idx]];
+    apply(next, items);
+  };
+
+  // ── Item-acties ────────────────────────────────────────────────────
+  // ── Excel-import ──────────────────────────────────────────────────
+  const importInputRef = useRef(null);
+  const [importing, setImporting] = useState(false);
+
+  const handleImportFile = async (file) => {
+    if (!file) return;
+    setImporting(true);
+    try {
+      const XLSX = await import('xlsx');
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+      // Kolomherkenning: zoek een kopregel met herkenbare woorden.
+      // Zonder kopregel: kolom A = categorie, B = item, C = aantal.
+      const norm = (v) => String(v ?? '').trim();
+      const lower = (v) => norm(v).toLowerCase();
+      let colCat = 0, colItem = 1, colQty = 2, startRow = 0;
+      const headerRow = rows.findIndex(r => r.some(c => {
+        const v = lower(c);
+        return ['categorie', 'category', 'item', 'naam', 'artikel', 'omschrijving', 'aantal', 'qty', 'quantity'].includes(v);
+      }));
+      if (headerRow !== -1) {
+        const hdr = rows[headerRow].map(lower);
+        const find = (names) => hdr.findIndex(h => names.includes(h));
+        const c = find(['categorie', 'category', 'rubriek']);
+        const i = find(['item', 'naam', 'artikel', 'omschrijving', 'wat']);
+        const q = find(['aantal', 'qty', 'quantity', 'aant', 'stuks']);
+        if (i !== -1) {
+          colItem = i;
+          colCat = c; // -1 = geen categoriekolom
+          colQty = q;
+          startRow = headerRow + 1;
+        }
+      }
+
+      // Rijen verwerken. Lege categoriecel = vorige categorie (zoals bij
+      // samengevoegde cellen in Excel). Geen categorie = "Algemeen".
+      const parsed = []; // { catName, label, qty }
+      let lastCat = '';
+      for (let r = startRow; r < rows.length; r++) {
+        const row = rows[r] || [];
+        const label = norm(row[colItem]);
+        const catCell = colCat >= 0 ? norm(row[colCat]) : '';
+        if (catCell) lastCat = catCell;
+        if (!label) continue;
+        const qtyRaw = colQty >= 0 ? row[colQty] : '';
+        const qty = Math.max(1, parseInt(qtyRaw, 10) || 1);
+        parsed.push({ catName: lastCat || 'Algemeen', label: label.slice(0, 80), qty });
+      }
+
+      if (parsed.length === 0) {
+        window.alert('Geen items gevonden in dit bestand. Verwacht formaat: kolommen Categorie | Item | Aantal (kopregel optioneel).');
+        return;
+      }
+
+      // Samenvoegen met bestaande lijst: categorieën op naam matchen,
+      // dubbele items (zelfde naam binnen de categorie) overslaan.
+      const nextCats = [...categories];
+      const nextItems = [...items];
+      const catByName = new Map(nextCats.map(c => [c.name.toLowerCase(), c]));
+      let added = 0, skipped = 0, newCats = 0;
+
+      for (const p of parsed) {
+        let cat = catByName.get(p.catName.toLowerCase());
+        if (!cat) {
+          cat = { id: uid(), name: p.catName.slice(0, 40) };
+          nextCats.push(cat);
+          catByName.set(p.catName.toLowerCase(), cat);
+          newCats++;
+        }
+        const dup = nextItems.some(it =>
+          it.categoryId === cat.id && it.label.toLowerCase() === p.label.toLowerCase()
+        );
+        if (dup) { skipped++; continue; }
+        nextItems.push({ id: uid(), categoryId: cat.id, label: p.label, qty: p.qty, checked: false });
+        added++;
+      }
+
+      const summary = [
+        `${added} item${added === 1 ? '' : 's'} toevoegen`,
+        newCats > 0 ? `${newCats} nieuwe categorie${newCats === 1 ? '' : 'ën'}` : null,
+        skipped > 0 ? `${skipped} al aanwezig (overgeslagen)` : null,
+      ].filter(Boolean).join(', ');
+
+      if (added === 0) {
+        window.alert(`Niets toe te voegen — ${summary}.`);
+        return;
+      }
+      if (window.confirm(`${summary}. Doorgaan?`)) {
+        apply(nextCats, nextItems);
+      }
+    } catch (e) {
+      window.alert('Bestand kon niet worden gelezen: ' + (e?.message || e));
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) importInputRef.current.value = '';
+    }
+  };
+
+  const addItem = (catId) => {
+    const draft = draftItem[catId] || {};
+    const label = (draft.label || '').trim();
+    if (!label) return;
+    const qty = Math.max(1, parseInt(draft.qty, 10) || 1);
+    const next = [
+      ...items,
+      { id: uid(), categoryId: catId, label: label.slice(0, 80), qty, checked: false },
+    ];
+    apply(categories, next);
+    setDraftItem((d) => ({ ...d, [catId]: { label: '', qty: '' } }));
+  };
+
+  const toggleItem = (itemId) => {
+    apply(categories, items.map((it) =>
+      it.id === itemId ? { ...it, checked: !it.checked } : it,
+    ));
+  };
+
+  const removeItem = (itemId) => {
+    apply(categories, items.filter((it) => it.id !== itemId));
+  };
+
+  // Itemnaam wijzigen
+  const renameItem = (itemId, label) => {
+    const v = label.trim();
+    if (!v) return;
+    apply(categories, items.map((it) =>
+      it.id === itemId ? { ...it, label: v.slice(0, 80) } : it));
+  };
+
+  // Item naar een andere categorie verplaatsen
+  const moveItemToCategory = (itemId, newCatId) => {
+    apply(categories, items.map((it) =>
+      it.id === itemId ? { ...it, categoryId: newCatId } : it));
+  };
+
+  // Belangrijk-vlag aan/uit
+  const toggleImportant = (itemId) => {
+    apply(categories, items.map((it) =>
+      it.id === itemId ? { ...it, important: !it.important } : it));
+  };
+
+  // Notitie bij een item opslaan
+  const setItemNote = (itemId, note) => {
+    apply(categories, items.map((it) =>
+      it.id === itemId ? { ...it, note: note.slice(0, 500) } : it));
+  };
+
+  const changeQty = (itemId, delta) => {
+    apply(categories, items.map((it) =>
+      it.id === itemId ? { ...it, qty: Math.max(1, it.qty + delta) } : it,
+    ));
+  };
+
+  const setDraft = (catId, field, value) =>
+    setDraftItem((d) => ({ ...d, [catId]: { ...(d[catId] || {}), [field]: value } }));
+
+  // ── Voortgang ──────────────────────────────────────────────────────
+  const total = items.length;
+  const done = items.filter((it) => it.checked).length;
+  const pct = total ? Math.round((done / total) * 100) : 0;
+
+  // Solo-modus: welke categorie hoort bij ?cat=…
+  const soloCategory = soloCat
+    ? categories.find((c) => String(c.id) === String(soloCat).trim()) || null
+    : null;
+  const soloItems = soloCategory ? items.filter((it) => it.categoryId === soloCategory.id) : null;
+  const soloDone = soloItems ? soloItems.filter((it) => it.checked).length : 0;
+
+  const formattedDate = updatedAt
+    ? new Date(updatedAt).toLocaleString('nl-NL', {
+        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+      })
+    : null;
+
+  return (
+    <div style={S.page}>
+      <style>{globalCss}</style>
+
+      <header style={S.header}>
+        <a href="/" style={S.backLink}>‹ Terug naar planner</a>
+        <p style={S.kicker}>{soloCategory ? 'Vakantie · Persoonlijke inpaklijst' : 'Vakantie · Inpakken'}</p>
+        <h1 style={S.title}>{soloCategory ? soloCategory.name : 'Wat gaat er mee'}</h1>
+        {soloCategory ? (
+          <p style={S.sub}>
+            Jouw eigen lijst. Vinkjes worden centraal opgeslagen en zijn ook
+            zichtbaar in de{' '}
+            <a href="/inpakken" style={{ color: teal, fontWeight: 600 }}>volledige inpaklijst</a>.
+          </p>
+        ) : (
+          <p style={S.sub}>
+            Maak je eigen categorieën en items aan, met aantal. De lijst is
+            gedeeld — iedereen vinkt af wat ingepakt is.
+          </p>
+        )}
+
+        <div style={{ display: soloCategory ? 'none' : 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            style={{ display: 'none' }}
+            onChange={(e) => handleImportFile(e.target.files?.[0])}
+          />
+          <button
+            onClick={() => importInputRef.current?.click()}
+            disabled={importing}
+            style={{ ...S.resetBtn, marginBottom: 0, opacity: importing ? 0.6 : 1 }}
+          >
+            {importing ? 'Bezig met lezen…' : '📥 Importeren uit Excel'}
+          </button>
+          {done > 0 && (
+            <button
+              onClick={() => {
+                if (window.confirm('Alle vinkjes uitzetten? Je categorieën en items blijven staan — handig bij een nieuwe vakantie.')) {
+                  apply(categories, items.map((it) => ({ ...it, checked: false })));
+                }
+              }}
+              style={{ ...S.resetBtn, marginBottom: 0 }}
+            >
+              ↺ Alle vinkjes resetten
+            </button>
+          )}
+        </div>
+
+        <div style={S.progressWrap}>
+          <div style={S.progressTrack}>
+            <div style={{
+              ...S.progressFill,
+              width: `${soloItems
+                ? (soloItems.length ? Math.round((soloDone / soloItems.length) * 100) : 0)
+                : pct}%`,
+            }} />
+          </div>
+          <span style={S.progressLabel}>
+            {soloItems ? `${soloDone}/${soloItems.length} ingepakt` : `${done}/${total} ingepakt`}
+          </span>
+        </div>
+
+        <div style={S.nameRow}>
+          <input
+            style={S.nameInput}
+            placeholder="Je naam (voor 'laatst bijgewerkt door')"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <span style={S.saveState}>
+            {saving ? 'Opslaan…' : formattedDate ? `${updatedBy ?? 'Iemand'} · ${formattedDate}` : ''}
+          </span>
+        </div>
+      </header>
+
+      {loading ? (
+        <p style={S.loading}>Laden…</p>
+      ) : (
+        <div style={S.sections}>
+          {soloCat && !soloCategory && categories.length > 0 && (
+            <p style={S.empty}>
+              Deze categorie bestaat niet (meer).{' '}
+              <a href="/inpakken" style={{ color: teal, fontWeight: 600 }}>Naar de volledige lijst</a>
+            </p>
+          )}
+
+          {categories.length === 0 && (
+            <p style={S.empty}>
+              Nog geen categorieën. Maak er hieronder een aan, bijvoorbeeld
+              “Kleding”, “Keuken” of “Camping”.
+            </p>
+          )}
+
+          {categories.length > 0 && !soloCategory && (
+            <div style={S.filterBar}>
+              <div style={S.filterChips}>
+                <button
+                  style={{ ...S.filterChip, ...(catFilter.length === 0 ? S.filterChipOn : {}) }}
+                  onClick={() => setCatFilter([])}
+                >
+                  Alle
+                </button>
+                {categories.map((cat) => {
+                  const on = catFilter.includes(cat.id);
+                  return (
+                    <button
+                      key={cat.id}
+                      style={{ ...S.filterChip, ...(on ? S.filterChipOn : {}) }}
+                      onClick={() => toggleCatFilter(cat.id)}
+                    >
+                      {cat.name}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                style={{ ...S.hideToggle, ...(hideChecked ? S.hideToggleOn : {}) }}
+                onClick={() => setHideChecked((v) => !v)}
+              >
+                {hideChecked ? '☑' : '☐'} Verberg ingepakt
+              </button>
+            </div>
+          )}
+
+          {(() => {
+            const visibleCats = soloCategory
+              ? [soloCategory]
+              : (soloCat && categories.length > 0)
+                ? [] // onbekende ?cat= → melding hierboven, geen volledige lijst
+                : categories.filter(
+                    (cat) => catFilter.length === 0 || catFilter.includes(cat.id),
+                  );
+            const anyVisibleItems = items.some(
+              (it) =>
+                (catFilter.length === 0 || catFilter.includes(it.categoryId)) &&
+                (!hideChecked || !it.checked),
+            );
+            if (visibleCats.length > 0 && !anyVisibleItems && hideChecked) {
+              return (
+                <p style={S.empty}>
+                  Alles in beeld is al ingepakt. Zet “Verberg ingepakt” uit om
+                  alles weer te zien.
+                </p>
+              );
+            }
+            return visibleCats.map((cat) => {
+              const catIndex = categories.findIndex((c) => c.id === cat.id);
+              const catItems = items.filter((it) => it.categoryId === cat.id);
+              const shownItems = hideChecked
+                ? catItems.filter((it) => !it.checked)
+                : catItems;
+              const catDone = catItems.filter((it) => it.checked).length;
+              const draft = draftItem[cat.id] || {};
+              return (
+                <section key={cat.id} style={S.section}>
+                  <div style={S.sectionHead}>
+                    {soloCategory ? (
+                      <h2 style={S.sectionTitle}>{cat.name}</h2>
+                    ) : (
+                      <input
+                        style={S.sectionTitleInput}
+                        defaultValue={cat.name}
+                        key={cat.name}
+                        onBlur={(e) => { if (e.target.value.trim() && e.target.value !== cat.name) renameCategory(cat.id, e.target.value); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') { e.target.value = cat.name; e.target.blur(); } }}
+                        title="Klik om de categorienaam te wijzigen"
+                      />
+                    )}
+                    <span style={S.sectionCount}>{catDone}/{catItems.length}</span>
+                    {!soloCategory && catFilter.length === 0 && categories.length > 1 && (
+                      <span style={S.reorder}>
+                        <button
+                          style={{ ...S.reorderBtn, ...(catIndex === 0 ? S.reorderBtnOff : {}) }}
+                          onClick={() => moveCategory(cat.id, -1)}
+                          disabled={catIndex === 0}
+                          title="Omhoog"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          style={{ ...S.reorderBtn, ...(catIndex === categories.length - 1 ? S.reorderBtnOff : {}) }}
+                          onClick={() => moveCategory(cat.id, 1)}
+                          disabled={catIndex === categories.length - 1}
+                          title="Omlaag"
+                        >
+                          ↓
+                        </button>
+                      </span>
+                    )}
+                    {!soloCategory && (
+                      <a
+                        href={`/inpakken?cat=${cat.id}`}
+                        title={`Eigen pagina van ${cat.name}`}
+                        style={S.soloLink}
+                      >
+                        👤
+                      </a>
+                    )}
+                    {!soloCategory && (
+                      <button
+                        style={S.catDelete}
+                        onClick={() => removeCategory(cat.id)}
+                        title="Categorie verwijderen"
+                      >
+                        ✕
+                      </button>
+                    )}
+                </div>
+
+                <ul style={S.list}>
+                  {shownItems.map((it) => {
+                    const open = expandedItem === it.id;
+                    return (
+                    <li key={it.id}>
+                      <div style={{ ...S.item, ...(it.checked ? S.itemOn : {}) }}>
+                        <button
+                          onClick={() => toggleItem(it.id)}
+                          style={{ ...S.box, ...(it.checked ? S.boxOn : {}) }}
+                        >
+                          {it.checked ? '✓' : ''}
+                        </button>
+                        {it.important && (
+                          <span title="Belangrijk" style={S.starOn}>★</span>
+                        )}
+                        <span style={{ ...S.label, ...(it.checked ? S.labelOn : {}) }}>
+                          {it.label}
+                          {it.note ? <span style={S.noteDot} title="Heeft notitie"> ✎</span> : null}
+                        </span>
+                        <div style={S.qtyWrap}>
+                          <button style={S.qtyBtn} onClick={() => changeQty(it.id, -1)}>−</button>
+                          <span style={S.qtyNum}>{it.qty}</span>
+                          <button style={S.qtyBtn} onClick={() => changeQty(it.id, 1)}>+</button>
+                        </div>
+                        <button
+                          style={{ ...S.expandBtn, ...(open ? S.expandBtnOn : {}) }}
+                          onClick={() => setExpandedItem(open ? null : it.id)}
+                          title="Bewerken"
+                        >
+                          {open ? '▲' : '⋯'}
+                        </button>
+                      </div>
+
+                      {open && (
+                        <div style={S.editPanel}>
+                          <label style={S.editLabel}>Naam</label>
+                          <input
+                            style={S.editInput}
+                            defaultValue={it.label}
+                            key={`name-${it.id}-${it.label}`}
+                            onBlur={(e) => { if (e.target.value.trim() && e.target.value !== it.label) renameItem(it.id, e.target.value); }}
+                            onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                          />
+
+                          <label style={S.editLabel}>Categorie</label>
+                          <select
+                            style={S.editInput}
+                            value={it.categoryId}
+                            onChange={(e) => moveItemToCategory(it.id, e.target.value)}
+                          >
+                            {categories.map((c) => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                          </select>
+
+                          <label style={{ ...S.editLabel, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 10 }}>
+                            <input
+                              type="checkbox"
+                              checked={!!it.important}
+                              onChange={() => toggleImportant(it.id)}
+                              style={{ width: 16, height: 16, accentColor: '#C97D5D' }}
+                            />
+                            Belangrijk markeren
+                          </label>
+
+                          <label style={S.editLabel}>Notitie</label>
+                          <textarea
+                            style={{ ...S.editInput, minHeight: 60, resize: 'vertical', fontFamily: 'inherit' }}
+                            defaultValue={it.note || ''}
+                            key={`note-${it.id}`}
+                            placeholder="Extra informatie, bv. waar het ligt of een herinnering…"
+                            onBlur={(e) => { if ((e.target.value || '') !== (it.note || '')) setItemNote(it.id, e.target.value); }}
+                          />
+
+                          <button
+                            style={S.editDelete}
+                            onClick={() => { removeItem(it.id); setExpandedItem(null); }}
+                          >
+                            🗑 Item verwijderen
+                          </button>
+                        </div>
+                      )}
+                    </li>
+                  );})}
+                </ul>
+
+                <div style={S.addItemRow}>
+                  <input
+                    style={S.addItemInput}
+                    placeholder="Nieuw item…"
+                    value={draft.label || ''}
+                    onChange={(e) => setDraft(cat.id, 'label', e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') addItem(cat.id); }}
+                  />
+                  <input
+                    style={S.addQtyInput}
+                    type="number"
+                    min="1"
+                    placeholder="1"
+                    value={draft.qty || ''}
+                    onChange={(e) => setDraft(cat.id, 'qty', e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') addItem(cat.id); }}
+                  />
+                  <button style={S.addItemBtn} onClick={() => addItem(cat.id)}>+</button>
+                </div>
+              </section>
+            );
+            });
+          })()}
+
+          {!soloCategory && (
+          <div style={S.addCatCard}>
+            <input
+              style={S.addCatInput}
+              placeholder="Nieuwe categorie…"
+              value={newCat}
+              onChange={(e) => setNewCat(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') addCategory(); }}
+            />
+            <button style={S.addCatBtn} onClick={addCategory}>+ Categorie</button>
+          </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Styling (zelfde tokens als de auto-checklist) ──────────────────────
+const teal = '#0f766e';
+const tealSoft = '#ccfbf1';
+const ink = '#1c1917';
+const paper = '#faf8f3';
+
+const globalCss = `
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600&display=swap');
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+body { margin: 0; }
+input[type=number]::-webkit-inner-spin-button { opacity: 1; }
+`;
+
+const S = {
+  page: {
+    fontFamily: "'DM Sans', sans-serif", background: paper, color: ink,
+    minHeight: '100vh', maxWidth: 640, margin: '0 auto', padding: '24px 18px 64px',
+    backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(15,118,110,0.06) 1px, transparent 0)',
+    backgroundSize: '22px 22px',
+  },
+  header: { marginBottom: 24 },
+  backLink: { display: 'inline-block', marginBottom: 14, fontSize: 13, fontWeight: 600, color: teal, textDecoration: 'none', padding: '6px 12px 6px 10px', background: tealSoft, borderRadius: 99 },
+  kicker: { fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase', color: teal, fontWeight: 600, margin: '0 0 6px' },
+  title: { fontFamily: "'Fraunces', serif", fontSize: 34, fontWeight: 700, lineHeight: 1.05, margin: '0 0 8px' },
+  sub: { fontSize: 15, lineHeight: 1.5, color: '#57534e', margin: '0 0 20px' },
+  soloLink: {
+    textDecoration: 'none', fontSize: 14, padding: '2px 6px',
+    borderRadius: 8, lineHeight: 1,
+  },
+  sectionTitleInput: {
+    fontFamily: "'Fraunces', serif", fontSize: 19, fontWeight: 500,
+    color: '#2D4F3E', background: 'transparent', border: '1px solid transparent',
+    borderRadius: 8, padding: '2px 6px', margin: '-2px -6px', flex: 'none',
+    maxWidth: 200, cursor: 'text',
+  },
+  starOn: { color: '#C97D5D', fontSize: 14, marginRight: 2, flexShrink: 0 },
+  noteDot: { color: '#3A7E84', fontSize: 12 },
+  expandBtn: {
+    width: 30, height: 30, border: 'none', borderRadius: 8,
+    background: 'transparent', color: '#8a8478', fontSize: 14,
+    cursor: 'pointer', flexShrink: 0, lineHeight: 1,
+  },
+  expandBtnOn: { background: '#efe9dd', color: '#2D4F3E' },
+  editPanel: {
+    margin: '2px 0 10px', padding: '12px 14px',
+    background: '#f4efe4', borderRadius: 12,
+    display: 'flex', flexDirection: 'column',
+  },
+  editLabel: {
+    fontSize: 11, fontWeight: 600, color: '#8a8478',
+    textTransform: 'uppercase', letterSpacing: '0.05em',
+    margin: '8px 0 4px',
+  },
+  editInput: {
+    fontFamily: 'inherit', fontSize: 14, padding: '9px 11px',
+    border: '1px solid #e7e2d8', borderRadius: 10,
+    background: '#fff', color: ink, width: '100%', boxSizing: 'border-box',
+  },
+  editDelete: {
+    marginTop: 14, alignSelf: 'flex-start',
+    fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
+    padding: '8px 14px', borderRadius: 10, cursor: 'pointer',
+    background: 'transparent', color: '#b4452f',
+    border: '1px solid #e3c4ba',
+  },
+  resetBtn: {
+    fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
+    padding: '8px 14px', marginBottom: 16,
+    background: 'transparent', color: teal,
+    border: `1px solid ${teal}`, borderRadius: 999, cursor: 'pointer',
+  },
+  progressWrap: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 },
+  progressTrack: { flex: 1, height: 10, background: tealSoft, borderRadius: 999, overflow: 'hidden' },
+  progressFill: { height: '100%', background: teal, borderRadius: 999, transition: 'width 0.35s ease' },
+  progressLabel: { fontSize: 13, fontWeight: 600, color: teal, whiteSpace: 'nowrap' },
+  nameRow: { display: 'flex', flexDirection: 'column', gap: 6 },
+  nameInput: { fontFamily: 'inherit', fontSize: 14, padding: '10px 12px', border: '1px solid #e7e2d8', borderRadius: 10, background: '#fff', color: ink },
+  saveState: { fontSize: 12, color: '#a8a29e', minHeight: 16 },
+  loading: { color: '#a8a29e', fontStyle: 'italic' },
+  empty: { color: '#a8a29e', fontStyle: 'italic', lineHeight: 1.5, marginTop: 0 },
+  sections: { display: 'flex', flexDirection: 'column', gap: 22 },
+  filterBar: { display: 'flex', flexDirection: 'column', gap: 10, padding: '14px', background: '#fff', border: '1px solid #ece7dd', borderRadius: 14 },
+  filterChips: { display: 'flex', flexWrap: 'wrap', gap: 6 },
+  filterChip: { fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '6px 12px', borderRadius: 99, border: '1px solid #e0dad0', background: paper, color: '#57534e', cursor: 'pointer' },
+  filterChipOn: { background: teal, borderColor: teal, color: '#fff' },
+  hideToggle: { fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '8px 12px', borderRadius: 10, border: '1px solid #e0dad0', background: paper, color: '#57534e', cursor: 'pointer', textAlign: 'left' },
+  hideToggleOn: { background: tealSoft, borderColor: tealSoft, color: teal },
+  section: {},
+  sectionHead: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, paddingBottom: 6, borderBottom: `2px solid ${tealSoft}` },
+  sectionTitle: { fontFamily: "'Fraunces', serif", fontSize: 19, fontWeight: 600, margin: 0, flex: 1 },
+  sectionCount: { fontSize: 13, fontWeight: 600, color: '#a8a29e' },
+  catDelete: { border: 'none', background: 'transparent', color: '#cbb9b0', fontSize: 14, cursor: 'pointer', padding: 4, lineHeight: 1 },
+  reorder: { display: 'flex', gap: 2 },
+  reorderBtn: { width: 26, height: 26, borderRadius: 7, border: '1px solid #e0dad0', background: paper, color: teal, fontSize: 14, fontWeight: 700, cursor: 'pointer', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  reorderBtnOff: { color: '#d6cfc3', cursor: 'default' },
+  list: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 },
+  item: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: '#fff', border: '1px solid #ece7dd', borderRadius: 12, transition: 'background 0.15s, border-color 0.15s' },
+  itemOn: { background: '#f0fdfa', borderColor: tealSoft },
+  box: { flexShrink: 0, width: 22, height: 22, borderRadius: 6, border: '2px solid #cbd5cf', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: '#fff', background: '#fff', cursor: 'pointer', transition: 'all 0.15s' },
+  boxOn: { background: teal, borderColor: teal },
+  label: { fontSize: 14.5, lineHeight: 1.3, color: ink, flex: 1 },
+  labelOn: { color: '#57534e', textDecoration: 'line-through', textDecorationColor: '#a7d3cd' },
+  qtyWrap: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 },
+  qtyBtn: { width: 26, height: 26, borderRadius: 7, border: '1px solid #e0dad0', background: '#faf8f3', color: teal, fontSize: 16, fontWeight: 600, cursor: 'pointer', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  qtyNum: { minWidth: 22, textAlign: 'center', fontSize: 14, fontWeight: 600, color: ink },
+  itemDelete: { border: 'none', background: 'transparent', fontSize: 14, cursor: 'pointer', padding: 2, opacity: 0.55, flexShrink: 0 },
+  addItemRow: { display: 'flex', gap: 6, marginTop: 8 },
+  addItemInput: { flex: 1, fontFamily: 'inherit', fontSize: 14, padding: '9px 11px', border: '1px solid #e7e2d8', borderRadius: 10, background: '#fff', color: ink },
+  addQtyInput: { width: 58, fontFamily: 'inherit', fontSize: 14, padding: '9px 8px', border: '1px solid #e7e2d8', borderRadius: 10, background: '#fff', color: ink, textAlign: 'center' },
+  addItemBtn: { width: 42, border: 'none', borderRadius: 10, background: tealSoft, color: teal, fontSize: 20, fontWeight: 600, cursor: 'pointer', lineHeight: 1 },
+  addCatCard: { display: 'flex', gap: 8, padding: '14px', background: '#fff', border: '1px dashed #d6cfc3', borderRadius: 14, marginTop: 4 },
+  addCatInput: { flex: 1, fontFamily: 'inherit', fontSize: 14, padding: '10px 12px', border: '1px solid #e7e2d8', borderRadius: 10, background: paper, color: ink },
+  addCatBtn: { border: 'none', borderRadius: 10, background: teal, color: '#fff', fontSize: 14, fontWeight: 600, padding: '0 16px', cursor: 'pointer', whiteSpace: 'nowrap' },
+};
