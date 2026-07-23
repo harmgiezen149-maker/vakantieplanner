@@ -279,10 +279,22 @@ export default function PackingList() {
     setDraftItem((d) => ({ ...d, [catId]: { label: '', qty: '' } }));
   };
 
+  // Vinkje: alles gepakt ↔ niets gepakt. Houdt de deelteller in sync.
   const toggleItem = (itemId) => {
-    apply(categories, items.map((it) =>
-      it.id === itemId ? { ...it, checked: !it.checked } : it,
-    ));
+    apply(categories, items.map((it) => {
+      if (it.id !== itemId) return it;
+      const nowChecked = !it.checked;
+      return { ...it, checked: nowChecked, packed: nowChecked ? it.qty : 0 };
+    }));
+  };
+
+  // Deelteller: "alvast gepakt" aantal. Bij packed >= qty vinkt hij vanzelf af.
+  const setPacked = (itemId, raw) => {
+    apply(categories, items.map((it) => {
+      if (it.id !== itemId) return it;
+      const n = Math.max(0, Math.min(it.qty, Math.floor(Number(raw) || 0)));
+      return { ...it, packed: n, checked: n >= it.qty };
+    }));
   };
 
   const removeItem = (itemId) => {
@@ -316,9 +328,13 @@ export default function PackingList() {
   };
 
   const changeQty = (itemId, delta) => {
-    apply(categories, items.map((it) =>
-      it.id === itemId ? { ...it, qty: Math.max(1, it.qty + delta) } : it,
-    ));
+    apply(categories, items.map((it) => {
+      if (it.id !== itemId) return it;
+      const qty = Math.max(1, it.qty + delta);
+      // Deelteller mee-clampen; afvink-status volgt de nieuwe verhouding
+      const packed = Math.min(it.packed ?? (it.checked ? it.qty : 0), qty);
+      return { ...it, qty, packed, checked: packed >= qty };
+    }));
   };
 
   const setDraft = (catId, field, value) =>
@@ -382,7 +398,7 @@ export default function PackingList() {
             <button
               onClick={() => {
                 if (window.confirm('Alle vinkjes uitzetten? Je categorieën en items blijven staan — handig bij een nieuwe vakantie.')) {
-                  apply(categories, items.map((it) => ({ ...it, checked: false })));
+                  apply(categories, items.map((it) => ({ ...it, checked: false, packed: 0 })));
                 }
               }}
               style={{ ...S.resetBtn, marginBottom: 0 }}
@@ -572,6 +588,21 @@ export default function PackingList() {
                           {it.label}
                           {it.note ? <span style={S.noteDot} title="Heeft notitie"> ✎</span> : null}
                         </span>
+                        {it.qty > 1 && !it.checked && (
+                          <div style={S.packedWrap} title="Alvast gepakt aantal">
+                            <input
+                              type="number"
+                              min="0"
+                              max={it.qty}
+                              value={it.packed ? String(it.packed) : ''}
+                              placeholder="0"
+                              onChange={(e) => setPacked(it.id, e.target.value)}
+                              onFocus={(e) => e.target.select()}
+                              style={S.packedInput}
+                            />
+                            <span style={S.packedSep}>/</span>
+                          </div>
+                        )}
                         <div style={S.qtyWrap}>
                           <button style={S.qtyBtn} onClick={() => changeQty(it.id, -1)}>−</button>
                           <span style={S.qtyNum}>{it.qty}</span>
@@ -784,6 +815,14 @@ const S = {
   label: { fontSize: 14.5, lineHeight: 1.3, color: ink, flex: 1 },
   labelOn: { color: '#57534e', textDecoration: 'line-through', textDecorationColor: '#a7d3cd' },
   qtyWrap: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 },
+  packedWrap: { display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 },
+  packedInput: {
+    width: 34, textAlign: 'center', fontFamily: 'inherit', fontSize: 13,
+    padding: '5px 2px', border: '1px solid #d9c9a8', borderRadius: 8,
+    background: '#fdf9ee', color: '#8a6d1f', fontWeight: 600,
+    MozAppearance: 'textfield',
+  },
+  packedSep: { fontSize: 12, color: '#8a8478', marginLeft: 2 },
   qtyBtn: { width: 26, height: 26, borderRadius: 7, border: '1px solid #e0dad0', background: '#faf8f3', color: teal, fontSize: 16, fontWeight: 600, cursor: 'pointer', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' },
   qtyNum: { minWidth: 22, textAlign: 'center', fontSize: 14, fontWeight: 600, color: ink },
   itemDelete: { border: 'none', background: 'transparent', fontSize: 14, cursor: 'pointer', padding: 2, opacity: 0.55, flexShrink: 0 },
