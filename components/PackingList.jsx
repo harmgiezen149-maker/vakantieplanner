@@ -330,7 +330,12 @@ export default function PackingList() {
   const changeQty = (itemId, delta) => {
     apply(categories, items.map((it) => {
       if (it.id !== itemId) return it;
-      const qty = Math.max(1, it.qty + delta);
+      const qty = Math.max(0, it.qty + delta);
+      if (qty === 0) {
+        // "Dit jaar niet mee": item blijft staan, doorgestreept.
+        // Vinkje niet automatisch zetten — dat doet de gebruiker zelf.
+        return { ...it, qty, packed: 0 };
+      }
       // Deelteller mee-clampen; afvink-status volgt de nieuwe verhouding
       const packed = Math.min(it.packed ?? (it.checked ? it.qty : 0), qty);
       return { ...it, qty, packed, checked: packed >= qty };
@@ -584,8 +589,9 @@ export default function PackingList() {
                         {it.important && (
                           <span title="Belangrijk" style={S.starOn}>★</span>
                         )}
-                        <span style={{ ...S.label, ...(it.checked ? S.labelOn : {}) }}>
+                        <span style={{ ...S.label, ...(it.checked ? S.labelOn : {}), ...(it.qty === 0 ? S.labelSkipped : {}) }}>
                           {it.label}
+                          {it.qty === 0 ? <span style={S.skipTag} title="Dit jaar niet mee"> · niet mee</span> : null}
                           {it.note ? <span style={S.noteDot} title="Heeft notitie"> ✎</span> : null}
                         </span>
                         {it.qty > 1 && !it.checked && (
@@ -814,6 +820,8 @@ const S = {
   boxOn: { background: teal, borderColor: teal },
   label: { fontSize: 14.5, lineHeight: 1.3, color: ink, flex: 1 },
   labelOn: { color: '#57534e', textDecoration: 'line-through', textDecorationColor: '#a7d3cd' },
+  labelSkipped: { color: '#a8a29e', textDecoration: 'line-through', textDecorationColor: '#c9a17d', fontStyle: 'italic' },
+  skipTag: { fontSize: 11, color: '#c9a17d', fontStyle: 'italic', fontWeight: 600 },
   qtyWrap: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 },
   packedWrap: { display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 },
   packedInput: {
