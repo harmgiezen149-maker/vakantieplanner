@@ -19,10 +19,52 @@ npm run dev          # http://localhost:3000
 npx next build       # moet slagen vóór je pusht
 ```
 
+In een websessie draait `npm install` al via de SessionStart-hook
+(`.claude/hooks/session-start.sh`), dus `npx next build` kan meteen.
+
 Er zijn geen tests en geen linter-config. `npx next build` is de enige poort — draai die
 na elke wijziging. De build slaagt zonder Redis-env-vars (je ziet dan alleen
 `[Upstash Redis] Unable to find environment variable` tijdens page-data-collectie); de
 API's falen dan pas op runtime.
+
+## Git en deployen — dit doe je zelf
+
+De eigenaar (harmgiezen149) heeft op 5 augustus 2026 expliciet gevraagd om
+wijzigingen zelfstandig af te ronden: **committen, naar `main` mergen en pushen
+zonder er eerst toestemming voor te vragen.** Dat is staande toestemming voor dit
+project; je hoeft er niet per sessie opnieuw naar te vragen.
+
+Vaste volgorde voor elke wijziging:
+
+```bash
+git pull --ff-only origin main     # eventuele web-edits eerst binnen
+# … wijzigingen …
+npx next build                     # POORT: slaagt dit niet, dan niet mergen
+git add -A && git commit -m "…"
+git checkout main && git merge --ff-only <werkbranch>
+git push -u origin main
+```
+
+Regels die daarbij horen:
+
+- **De build is de poort.** Er zijn geen tests en geen linter, dus `npx next build`
+  is de enige geautomatiseerde controle. Slaagt hij niet, dan gaat er niets naar
+  `main` — dan laat je het op een branch staan en meld je wat er stuk is.
+- **Pushen naar `main` = live deployen.** Vercel deployt automatisch op `main`; het
+  gezin gebruikt de app tijdens de vakantie. Bij iets dat je niet met een build kunt
+  verifiëren (gedrag dat alleen met echte Redis-data blijkt, of een wijziging in het
+  datamodel): eerst op een branch, en de eigenaar laten kijken.
+- **Krijg je in de sessie een aangewezen werkbranch** (`claude/…`), gebruik die dan
+  om op te werken en merge hem daarna fast-forward in `main`. De branch is een
+  werkplek, niet het eindstation.
+- **Nooit force-pushen of `main` herschrijven.** `.claude/settings.json` blokkeert
+  `--force`, `reset --hard` en ref-deletes; dat is opzet, omzeil het niet.
+
+Wat een sessie **niet** kan: een remote branch verwijderen. `git push origin --delete`
+geeft HTTP 403 — de git-credential van een sessie mag wel pushen, maar geen refs
+verwijderen, en de GitHub-tools hebben geen delete-branch-functie. Opgeruimde branches
+zijn dus handwerk voor de eigenaar (GitHub → Branches → prullenbak). Blijf er niet op
+doorproberen; meld het en ga door.
 
 ## Structuur
 
