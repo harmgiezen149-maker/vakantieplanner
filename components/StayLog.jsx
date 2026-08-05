@@ -5,13 +5,18 @@ import Link from 'next/link';
 import { upload } from '@vercel/blob/client';
 import {
   ArrowLeft, Plus, Trash2, Star, MapPin, Camera, Loader2, X, ChevronDown,
+  SlidersHorizontal, RefreshCw,
 } from 'lucide-react';
 import { COLORS, formatDateRange } from '@/lib/data';
 import { getPin } from '@/lib/maps';
 import LocationPicker from '@/components/LocationPicker';
 import {
   uid, fetchStayLog, saveStayLog, archiveTripStays,
+  reverseCountry, countryFromAddress,
 } from '@/lib/stayLog';
+import {
+  STAY_TYPES, stayTypeLabel, countryFlag,
+} from '@/lib/stayTypes';
 
 const getName = () => {
   if (typeof window === 'undefined') return '';
@@ -184,6 +189,13 @@ export default function StayLog() {
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [uploadingFor, setUploadingFor] = useState(null);
+  // Voortgang van het achteraf bepalen van landen: { done, total } | null
+  const [countryProgress, setCountryProgress] = useState(null);
+
+  // Filters
+  const [fCountry, setFCountry] = useState(null); // landcode, '' = onbekend
+  const [fType, setFType] = useState('');
+  const [fMinScore, setFMinScore] = useState(0);
 
   const saveTimer = useRef(null);
   const latest = useRef([]);
@@ -218,6 +230,41 @@ export default function StayLog() {
     return () => window.removeEventListener('focus', onFocus);
   }, [load]);
 
+  // Verblijven die wél coördinaten maar nog geen land hebben (uit een reis
+  // gearchiveerd, of van vóór deze functie) krijgen het land alsnog. Nominatim
+  // staat één verzoek per seconde toe, dus dit gaat op de achtergrond en
+  // netjes op een rij — nooit met Promise.all.
+  const backfillDone = useRef(false);
+  useEffect(() => {
+    if (loading || backfillDone.current) return;
+    const todo = stays.filter(s => Array.isArray(s.coords) && !s.country);
+    if (todo.length === 0) { backfillDone.current = true; return; }
+
+    backfillDone.current = true;
+    let cancelled = false;
+
+    (async () => {
+      const gevonden = new Map();
+      for (let i = 0; i < todo.length; i++) {
+        if (cancelled) return;
+        setCountryProgress({ done: i, total: todo.length });
+        const res = await reverseCountry(todo[i].coords);
+        if (res) gevonden.set(todo[i].id, res);
+        if (i < todo.length - 1) await new Promise(r => setTimeout(r, 1100));
+      }
+      if (cancelled) return;
+      setCountryProgress(null);
+      if (gevonden.size === 0) return;
+      // Eén keer opslaan aan het eind, op basis van de nieuwste staat
+      apply(latest.current.map(s => gevonden.has(s.id)
+        ? { ...s, ...gevonden.get(s.id) }
+        : s));
+    })();
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, stays.length]);
+
   const persist = useCallback((next) => {
     latest.current = next;
     dirty.current = true;
@@ -247,13 +294,44 @@ export default function StayLog() {
       : s));
   };
 
+  // Locatie wijzigen betekent: land opnieuw bepalen. Komt het land al mee uit
+  // het zoekresultaat, dan is dat gratis; anders vragen we het na via reverse
+  // geocoding en werken we het verblijf zo nodig een tweede keer bij.
+  const setLocation = (id, loc) => {
+    const direct = countryFromAddress(loc?.address);
+    updateStay(id, {
+      coords: loc?.coords || null,
+      locationLabel: loc?.fullName || loc?.label || null,
+      country: direct?.country || null,
+      countryCode: direct?.countryCode || null,
+    });
+    if (!loc?.coords || direct) return;
+    reverseCountry(loc.coords).then((res) => {
+      if (res) updateStay(id, res);
+    });
+  };
+
+  const bepaalLand = async (stay) => {
+    if (!stay.coords) return;
+    setCountryProgress({ done: 0, total: 1 });
+    const res = await reverseCountry(stay.coords);
+    setCountryProgress(null);
+    if (res) updateStay(stay.id, res);
+    else window.alert('Kon het land niet bepalen. Probeer het zo nog eens — OpenStreetMap is soms even niet bereikbaar.');
+  };
+
   const addStay = (data) => {
     const now = new Date().toISOString();
+    const direct = countryFromAddress(data.address);
     const stay = {
       id: `v_${uid()}`,
       name: data.name,
       locationLabel: data.locationLabel,
       coords: data.coords,
+      type: data.type || null,
+      typeOther: data.type === 'anders' ? (data.typeOther || null) : null,
+      country: direct?.country || null,
+      countryCode: direct?.countryCode || null,
       startDate: data.startDate || null,
       endDate: data.endDate || null,
       periodLabel: data.periodLabel || null,
@@ -269,6 +347,12 @@ export default function StayLog() {
     setAdding(false);
     setExpandedId(stay.id);
     setSelectedId(stay.id);
+    // Geen land uit het zoekresultaat? Dan alsnog achteraf bepalen.
+    if (stay.coords && !stay.country) {
+      reverseCountry(stay.coords).then((res) => {
+        if (res) updateStay(stay.id, res);
+      });
+    }
   };
 
   const removeStay = async (stay) => {
@@ -380,9 +464,44 @@ export default function StayLog() {
 
   // ── Afgeleide waarden ─────────────────────────────────────────────
 
+  // Filteropties worden opgebouwd uit wat er daadwerkelijk in het logboek
+  // staat, zodat de balk niet volloopt met landen waar je nooit bent geweest.
+  const filterOpties = useMemo(() => {
+    const landen = new Map();
+    const typen = new Set();
+    stays.forEach((s) => {
+      if (s.country) {
+        landen.set(s.countryCode || s.country, { code: s.countryCode, naam: s.country });
+      } else if (Array.isArray(s.coords) || s.locationLabel) {
+        landen.set('', { code: null, naam: 'Land onbekend' });
+      }
+      if (s.type) typen.add(s.type);
+    });
+    return {
+      landen: [...landen.entries()]
+        .map(([key, v]) => ({ key, ...v }))
+        .sort((a, b) => (a.key === '' ? 1 : b.key === '' ? -1 : a.naam.localeCompare(b.naam))),
+      typen: STAY_TYPES.filter(t => typen.has(t.id)),
+    };
+  }, [stays]);
+
+  const filterActief = fCountry !== null || fType !== '' || fMinScore > 0;
+
+  const gefilterd = useMemo(() => {
+    return stays.filter((s) => {
+      if (fCountry !== null) {
+        const key = s.country ? (s.countryCode || s.country) : '';
+        if (key !== fCountry) return false;
+      }
+      if (fType && s.type !== fType) return false;
+      if (fMinScore > 0 && !(s.score != null && s.score >= fMinScore)) return false;
+      return true;
+    });
+  }, [stays, fCountry, fType, fMinScore]);
+
   // Nieuwste bovenaan; verblijven zonder datum onderaan
   const sorted = useMemo(() => {
-    return [...stays].sort((a, b) => {
+    return [...gefilterd].sort((a, b) => {
       const da = a.startDate || a.endDate || '';
       const db = b.startDate || b.endDate || '';
       if (da && db) return db.localeCompare(da);
@@ -390,19 +509,22 @@ export default function StayLog() {
       if (db) return 1;
       return (a.name || '').localeCompare(b.name || '');
     });
-  }, [stays]);
+  }, [gefilterd]);
 
   const stats = useMemo(() => {
-    const scored = stays.filter(s => s.score != null);
+    const scored = gefilterd.filter(s => s.score != null);
     const avg = scored.length
       ? Math.round((scored.reduce((a, s) => a + s.score, 0) / scored.length) * 10) / 10
       : null;
     return {
-      total: stays.length,
-      onMap: stays.filter(s => Array.isArray(s.coords)).length,
+      total: gefilterd.length,
+      alle: stays.length,
+      onMap: gefilterd.filter(s => Array.isArray(s.coords)).length,
       avg,
     };
-  }, [stays]);
+  }, [gefilterd, stays.length]);
+
+  const wisFilters = () => { setFCountry(null); setFType(''); setFMinScore(0); };
 
   const onSelectFromMap = useCallback((id) => {
     setSelectedId(id);
@@ -434,10 +556,13 @@ export default function StayLog() {
 
         {error && <div style={S.error}>{error}</div>}
 
-        {stats.total > 0 && (
+        {stats.alle > 0 && (
           <div style={S.statsRow}>
             <div>
-              <div style={S.statNum}>{stats.total}</div>
+              <div style={S.statNum}>
+                {stats.total}
+                {filterActief && <span style={S.statVan}>/{stats.alle}</span>}
+              </div>
               <div style={S.statLabel}>Verblijven</div>
             </div>
             <div style={S.statDivider} />
@@ -454,13 +579,26 @@ export default function StayLog() {
             </div>
             <div style={{ flex: 1 }} />
             <div style={S.saveState}>
-              {saving ? 'Opslaan…' : updatedBy ? `Laatst: ${updatedBy}` : ''}
+              {countryProgress
+                ? `Land bepalen… ${countryProgress.done + 1}/${countryProgress.total}`
+                : saving ? 'Opslaan…' : updatedBy ? `Laatst: ${updatedBy}` : ''}
             </div>
           </div>
         )}
 
+        {stats.alle > 1 && (
+          <FilterBar
+            opties={filterOpties}
+            fCountry={fCountry} setFCountry={setFCountry}
+            fType={fType} setFType={setFType}
+            fMinScore={fMinScore} setFMinScore={setFMinScore}
+            actief={filterActief}
+            onWis={wisFilters}
+          />
+        )}
+
         {stats.onMap > 0 && (
-          <StayMap stays={stays} selectedId={selectedId} onSelect={onSelectFromMap} />
+          <StayMap stays={gefilterd} selectedId={selectedId} onSelect={onSelectFromMap} />
         )}
 
         <div style={S.actions}>
@@ -481,12 +619,20 @@ export default function StayLog() {
         )}
 
         {sorted.length === 0 && !adding && (
-          <div style={S.empty}>
-            <div style={S.emptyTitle}>Nog niets in het logboek</div>
-            Voeg de huidige reis toe met de knop hierboven, of zet er met
-            “Verblijf toevoegen” een vakantie van vroeger in. Een adres, een
-            Google Maps-link of kale coördinaten werken allemaal.
-          </div>
+          filterActief ? (
+            <div style={S.empty}>
+              <div style={S.emptyTitle}>Niets gevonden</div>
+              Geen verblijf voldoet aan deze combinatie.{' '}
+              <button onClick={wisFilters} style={S.linkBtn}>Wis de filters</button>
+            </div>
+          ) : (
+            <div style={S.empty}>
+              <div style={S.emptyTitle}>Nog niets in het logboek</div>
+              Voeg de huidige reis toe met de knop hierboven, of zet er met
+              “Verblijf toevoegen” een vakantie van vroeger in. Een adres, een
+              Google Maps-link of kale coördinaten werken allemaal.
+            </div>
+          )
         )}
 
         <div style={S.list}>
@@ -503,6 +649,8 @@ export default function StayLog() {
                 setSelectedId(stay.id);
               }}
               onUpdate={(patch) => updateStay(stay.id, patch)}
+              onLocation={(loc) => setLocation(stay.id, loc)}
+              onBepaalLand={() => bepaalLand(stay)}
               onRemove={() => removeStay(stay)}
               onAddPhotos={(files) => addPhotos(stay.id, files)}
               onRemovePhoto={(photo) => removePhoto(stay.id, photo)}
@@ -524,6 +672,8 @@ const StayForm = ({ onSave, onCancel }) => {
   const [periodLabel, setPeriodLabel] = useState('');
   const [score, setScore] = useState('');
   const [review, setReview] = useState('');
+  const [type, setType] = useState('');
+  const [typeOther, setTypeOther] = useState('');
   const [err, setErr] = useState('');
 
   const submit = () => {
@@ -540,6 +690,9 @@ const StayForm = ({ onSave, onCancel }) => {
       name: n.slice(0, 90),
       locationLabel: location?.fullName || location?.label || null,
       coords: location?.coords || null,
+      address: location?.address || null,
+      type: type || null,
+      typeOther: typeOther.trim().slice(0, 40) || null,
       startDate: startDate || null,
       endDate: endDate || null,
       periodLabel: periodLabel.trim().slice(0, 60) || null,
@@ -565,6 +718,13 @@ const StayForm = ({ onSave, onCancel }) => {
         value={location}
         onChange={setLocation}
         placeholder="Zoek een plek of plak een Maps-link"
+      />
+      <div style={S.hint}>Het land wordt hier automatisch uit afgeleid.</div>
+
+      <label style={S.label}>Soort verblijf</label>
+      <TypeSelect
+        value={type} onChange={setType}
+        other={typeOther} onOther={setTypeOther}
       />
 
       <div style={S.dateRow}>
@@ -613,6 +773,105 @@ const StayForm = ({ onSave, onCancel }) => {
   );
 };
 
+// ── Soort verblijf ──────────────────────────────────────────────────
+// Een <select> en geen chips: acht opties naast elkaar is te veel op een
+// telefoon. Bij "anders" verschijnt een vrij tekstveld, zodat bv.
+// "vakantiehuisje" niet als kale "Anders" in het logboek eindigt.
+
+const TypeSelect = ({ value, onChange, other, onOther }) => (
+  <>
+    <select
+      value={value || ''}
+      onChange={(e) => onChange(e.target.value)}
+      style={S.select}
+    >
+      <option value="">— niet ingevuld —</option>
+      {STAY_TYPES.map(t => (
+        <option key={t.id} value={t.id}>{t.emoji} {t.label}</option>
+      ))}
+    </select>
+    {value === 'anders' && (
+      <input
+        style={{ ...S.input, marginTop: 8 }}
+        value={other || ''}
+        onChange={(e) => onOther(e.target.value.slice(0, 40))}
+        placeholder="Wat was het? Bv. vakantiehuisje, boot, bij familie"
+      />
+    )}
+  </>
+);
+
+// ── Filterbalk ──────────────────────────────────────────────────────
+
+const FilterBar = ({
+  opties, fCountry, setFCountry, fType, setFType,
+  fMinScore, setFMinScore, actief, onWis,
+}) => (
+  <div style={S.filterBar}>
+    <div style={S.filterHead}>
+      <SlidersHorizontal size={14} style={{ color: COLORS.lake }} />
+      <span style={S.filterTitle}>Zoeken</span>
+      {actief && (
+        <button onClick={onWis} style={S.linkBtn}>Wis filters</button>
+      )}
+    </div>
+
+    {opties.landen.length > 1 && (
+      <div style={S.filterGroep}>
+        <div style={S.filterLabel}>Land</div>
+        <div style={S.chipRow}>
+          <Chip on={fCountry === null} onClick={() => setFCountry(null)}>Alle</Chip>
+          {opties.landen.map(l => (
+            <Chip
+              key={l.key}
+              on={fCountry === l.key}
+              onClick={() => setFCountry(fCountry === l.key ? null : l.key)}
+            >
+              {l.code ? `${countryFlag(l.code)} ${l.naam}` : l.naam}
+            </Chip>
+          ))}
+        </div>
+      </div>
+    )}
+
+    {opties.typen.length > 0 && (
+      <div style={S.filterGroep}>
+        <div style={S.filterLabel}>Soort verblijf</div>
+        <select value={fType} onChange={(e) => setFType(e.target.value)} style={S.select}>
+          <option value="">Alle soorten</option>
+          {opties.typen.map(t => (
+            <option key={t.id} value={t.id}>{t.emoji} {t.label}</option>
+          ))}
+        </select>
+      </div>
+    )}
+
+    <div style={S.filterGroep}>
+      <div style={S.filterLabel}>Cijfer</div>
+      <div style={S.chipRow}>
+        <Chip on={fMinScore === 0} onClick={() => setFMinScore(0)}>Alle</Chip>
+        {[6, 7, 8, 9].map(n => (
+          <Chip key={n} on={fMinScore === n} onClick={() => setFMinScore(fMinScore === n ? 0 : n)}>
+            {n}+
+          </Chip>
+        ))}
+      </div>
+    </div>
+  </div>
+);
+
+const Chip = ({ on, onClick, children }) => (
+  <button
+    onClick={onClick}
+    style={{
+      ...S.chip,
+      background: on ? COLORS.forest : 'transparent',
+      color: on ? COLORS.cream : COLORS.ink,
+      borderColor: on ? COLORS.forest : COLORS.hairline,
+    }}
+  >{children}</button>
+);
+
 // ── Cijfer 1-10 ─────────────────────────────────────────────────────
 
 const ScorePicker = ({ value, onChange }) => (
@@ -640,10 +899,14 @@ const ScorePicker = ({ value, onChange }) => (
 
 const StayCard = ({
   stay, selected, expanded, uploading, cardRef,
-  onToggle, onUpdate, onRemove, onAddPhotos, onRemovePhoto,
+  onToggle, onUpdate, onLocation, onBepaalLand, onRemove, onAddPhotos, onRemovePhoto,
 }) => {
   const fileRef = useRef(null);
   const period = formatDateRange(stay.startDate, stay.endDate) || stay.periodLabel || null;
+  const typeLabel = stayTypeLabel(stay);
+  const landLabel = stay.country
+    ? `${countryFlag(stay.countryCode)} ${stay.country}`.trim()
+    : null;
 
   return (
     <div
@@ -664,9 +927,13 @@ const StayCard = ({
             {stay.source === 'trip' && <span style={S.tripTag}>uit reis</span>}
           </div>
           <div style={S.cardMeta}>
-            {period || 'Datum onbekend'}
-            {stay.tripTitle ? ` · ${stay.tripTitle}` : ''}
-            {!stay.coords ? ' · geen locatie' : ''}
+            {[
+              landLabel,
+              typeLabel,
+              period || 'Datum onbekend',
+              stay.tripTitle || null,
+              !stay.coords ? 'geen locatie' : null,
+            ].filter(Boolean).join(' · ')}
           </div>
         </div>
         {stay.photos?.length > 0 && (
@@ -709,11 +976,30 @@ const StayCard = ({
           <label style={S.label}>Locatie</label>
           <LocationPicker
             value={stay.coords ? { label: stay.locationLabel || stay.name, coords: stay.coords } : null}
-            onChange={(loc) => onUpdate({
-              coords: loc?.coords || null,
-              locationLabel: loc?.fullName || loc?.label || null,
-            })}
+            onChange={onLocation}
             placeholder="Zoek een plek of plak een Maps-link"
+          />
+          <div style={S.landRow}>
+            {landLabel ? (
+              <span>Land: <strong style={{ color: COLORS.forest }}>{landLabel}</strong></span>
+            ) : stay.coords ? (
+              <>
+                <span>Land nog niet bepaald.</span>
+                <button onClick={onBepaalLand} style={S.linkBtn}>
+                  <RefreshCw size={11} /> Opnieuw bepalen
+                </button>
+              </>
+            ) : (
+              <span>Geen locatie, dus ook geen land.</span>
+            )}
+          </div>
+
+          <label style={S.label}>Soort verblijf</label>
+          <TypeSelect
+            value={stay.type}
+            onChange={(v) => onUpdate({ type: v || null, typeOther: v === 'anders' ? stay.typeOther : null })}
+            other={stay.typeOther}
+            onOther={(v) => onUpdate({ typeOther: v || null })}
           />
 
           <div style={S.dateRow}>
@@ -826,7 +1112,44 @@ const S = {
     letterSpacing: 0.5, textTransform: 'uppercase',
   },
   statDivider: { width: 1, background: COLORS.hairline, alignSelf: 'stretch' },
-  saveState: { fontSize: 11, color: COLORS.inkLight },
+  statVan: { color: COLORS.inkLight, fontSize: 14 },
+  saveState: { fontSize: 11, color: COLORS.inkLight, textAlign: 'right' },
+  filterBar: {
+    display: 'flex', flexDirection: 'column', gap: 10,
+    padding: '12px 14px', marginBottom: 12,
+    background: COLORS.creamSoft, border: `1px solid ${COLORS.hairline}`,
+    borderRadius: 14,
+  },
+  filterHead: { display: 'flex', alignItems: 'center', gap: 7 },
+  filterTitle: {
+    fontSize: 11, letterSpacing: 0.5, textTransform: 'uppercase',
+    fontWeight: 600, color: COLORS.lake, flex: 1,
+  },
+  filterGroep: { display: 'flex', flexDirection: 'column', gap: 6 },
+  filterLabel: { fontSize: 11, color: COLORS.inkLight, fontWeight: 600 },
+  chipRow: { display: 'flex', flexWrap: 'wrap', gap: 6 },
+  chip: {
+    padding: '6px 12px', borderRadius: 999, cursor: 'pointer',
+    border: `1px solid ${COLORS.hairline}`,
+    fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600,
+  },
+  select: {
+    width: '100%', padding: '11px 13px', background: COLORS.cream,
+    border: `1px solid ${COLORS.hairline}`, borderRadius: 10,
+    fontFamily: "'DM Sans', sans-serif", fontSize: 14,
+    color: COLORS.charcoal, outline: 'none', boxSizing: 'border-box',
+  },
+  linkBtn: {
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
+    color: COLORS.lake, fontFamily: "'DM Sans', sans-serif",
+    fontSize: 12, fontWeight: 600, textDecoration: 'underline',
+  },
+  hint: { fontSize: 11, color: COLORS.inkLight, marginTop: 6 },
+  landRow: {
+    display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+    marginTop: 8, fontSize: 12, color: COLORS.ink,
+  },
   actions: { display: 'flex', gap: 8, flexWrap: 'wrap', margin: '16px 0 4px' },
   primaryBtn: {
     display: 'inline-flex', alignItems: 'center', gap: 7,

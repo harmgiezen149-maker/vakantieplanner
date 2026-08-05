@@ -104,7 +104,10 @@ const LocationPicker = ({ value, onChange, accentColor = COLORS.forest, placehol
     setPickedCoords(coords);
     setShowResults(false);
     setResults([]);
-    onChange({ label: r.shortName, coords, fullName: r.name });
+    // address komt uit Nominatim (addressdetails=1) en bevat o.a. het land.
+    // Het verblijvenlogboek leidt daar het land uit af zonder extra verzoek;
+    // de planner negeert het veld.
+    onChange({ label: r.shortName, coords, fullName: r.name, address: r.address || null });
   };
 
   const onClear = () => {

@@ -1,4 +1,5 @@
 import { getRedis } from '@/lib/redis';
+import { STAY_TYPE_IDS } from '@/lib/stayTypes';
 
 // Het verblijvenlogboek: alle plekken waar het gezin heeft gelogeerd, met
 // bezoekdatum, cijfer, review en foto's.
@@ -63,11 +64,20 @@ function sanitizeStay(raw, i) {
       })).filter(p => p.url)
     : [];
 
+  const type = STAY_TYPE_IDS.includes(raw?.type) ? raw.type : null;
+
   return {
     id: str(raw?.id, 80) || `v_${Date.now()}_${i}`,
     name: str(raw?.name, 90) || 'Naamloos verblijf',
     locationLabel: str(raw?.locationLabel, 200),
     coords,
+    type,
+    // Eigen omschrijving hoort alleen bij "anders"
+    typeOther: type === 'anders' ? str(raw?.typeOther, 40) : null,
+    country: str(raw?.country, 60),
+    countryCode: /^[A-Za-z]{2}$/.test(raw?.countryCode || '')
+      ? String(raw.countryCode).toUpperCase()
+      : null,
     startDate: isoDate(raw?.startDate),
     endDate: isoDate(raw?.endDate),
     periodLabel: str(raw?.periodLabel, 60),

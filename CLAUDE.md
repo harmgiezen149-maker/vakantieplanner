@@ -93,7 +93,7 @@ app/
 components/   Planner.jsx (~4000 r.), MapView.jsx, DayOverview.jsx,
               PackingList.jsx, Checklist.jsx, StayLog.jsx, LocationPicker.jsx
 lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
-              (Maps-links + PIN), stayLog.js, redis.js, useRoute.js
+              (Maps-links + PIN), stayLog.js, stayTypes.js, redis.js, useRoute.js
 ```
 
 `components/Planner.jsx` is bewust één groot bestand: alle sheets (`PickDaySheet`,
@@ -111,7 +111,7 @@ Drie losse Redis-documenten, elk één JSON-blob:
 | `planner:trip` | `{ plan, customActivities, locationOverrides, tripConfig, suggestExclusions, updatedAt, updatedBy }` |
 | `planner:inpakken` | `{ categories:[{id,name}], items:[{id,categoryId,label,qty,checked,packed,important,note}], updatedBy, updatedAt }` |
 | `planner:checklist` | `{ checked:{}, updatedBy, updatedAt }` |
-| `planner:verblijven` | `{ stays:[{id,name,locationLabel,coords,startDate,endDate,periodLabel,tripTitle,score,review,photos,source}], updatedBy, updatedAt }` |
+| `planner:verblijven` | `{ stays:[{id,name,locationLabel,coords,type,typeOther,country,countryCode,startDate,endDate,periodLabel,tripTitle,score,review,photos,source}], updatedBy, updatedAt }` |
 
 De eerste drie lezen eenmalig een **legacy key** (`vosges:family-plan`,
 `vogezen2026:*`) als de nieuwe leeg is. Niet weghalen — dat is de migratie van de oude
@@ -213,7 +213,16 @@ En `onUploadCompleted` vuurt **niet lokaal** (Blob moet die callback publiek kun
 bereiken), dus hang er geen opslag aan — de client schrijft de teruggekregen URL zelf weg.
 Foto's worden vóór het uploaden in de browser verkleind tot max 1600 px.
 
-**13. Bewust géén service worker.**
+**13. Het land is afgeleid, niet ingetypt.**
+`STAY_TYPES` en de landhulpjes staan in `lib/stayTypes.js` — een module **zonder**
+`'use client'`, want `app/api/verblijven/route.js` valideert `type` tegen diezelfde lijst.
+Zet er dus geen fetch of localStorage in; dat hoort in `lib/stayLog.js`. Het land komt uit
+twee bronnen: het `address`-object dat `/api/geocode` bij een zoekresultaat al meelevert
+(gratis), en anders reverse geocoding via `/api/geocode?lat=&lng=`. **Nominatim staat één
+verzoek per seconde toe**, dus het bijwerken van bestaande verblijven gaat sequentieel met
+~1,1 s ertussen — nooit `Promise.all`.
+
+**14. Bewust géén service worker.**
 De PWA is manifest + iconen, meer niet. Voeg er geen offline-caching aan toe zonder dat
 expliciet te bespreken: gecachete JS naast een gedeeld Redis-document geeft precies de
 "waarom zie ik oude data"-klasse bugs die punt 4 probeert te vermijden.

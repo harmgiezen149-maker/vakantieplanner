@@ -13,14 +13,59 @@ function rateLimitOK(ip) {
   return true;
 }
 
+const NOMINATIM_HEADERS = {
+  'User-Agent': 'VakantiePlanner/1.0 (familie-vakantie planner)',
+  'Accept-Language': 'nl,en,fr,de',
+};
+
+// Reverse geocoding: coördinaten → land. Gebruikt door het verblijvenlogboek
+// om het land automatisch af te leiden uit de locatie van een verblijf.
+// Accept-Language zorgt dat er "Frankrijk" terugkomt en niet "France".
+async function reverse(lat, lng) {
+  const url = 'https://nominatim.openstreetmap.org/reverse?' +
+    `lat=${lat}&lon=${lng}&format=json&zoom=5&addressdetails=1`;
+  const res = await fetch(url, { headers: NOMINATIM_HEADERS });
+  if (!res.ok) {
+    return NextResponse.json({ error: `OpenStreetMap fout ${res.status}` }, { status: 502 });
+  }
+  const raw = await res.json();
+  const addr = raw?.address || {};
+  return NextResponse.json({
+    country: addr.country || null,
+    countryCode: addr.country_code ? String(addr.country_code).toUpperCase() : null,
+    label: raw?.display_name || null,
+  });
+}
+
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const q = (searchParams.get('q') || '').trim();
+  const latRaw = searchParams.get('lat');
+  const lngRaw = searchParams.get('lng');
+
+  const ip = request.headers.get('x-forwarded-for') || 'unknown';
+
+  // Reverse-modus: ?lat=&lng=
+  if (latRaw != null && lngRaw != null) {
+    const lat = Number(latRaw);
+    const lng = Number(lngRaw);
+    if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+      return NextResponse.json({ error: 'Ongeldige coördinaten' }, { status: 400 });
+    }
+    if (!rateLimitOK(ip)) {
+      return NextResponse.json({ error: 'Te veel zoekopdrachten, wacht even.' }, { status: 429 });
+    }
+    try {
+      return await reverse(lat, lng);
+    } catch (e) {
+      return NextResponse.json({ error: e.message }, { status: 500 });
+    }
+  }
+
   if (!q || q.length < 2) {
     return NextResponse.json({ results: [] });
   }
 
-  const ip = request.headers.get('x-forwarded-for') || 'unknown';
   if (!rateLimitOK(ip)) {
     return NextResponse.json({ error: 'Te veel zoekopdrachten, wacht even.' }, { status: 429 });
   }
@@ -31,12 +76,7 @@ export async function GET(request) {
       `q=${encodeURIComponent(q)}` +
       `&format=json&limit=6&addressdetails=1`;
 
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'VakantiePlanner/1.0 (familie-vakantie planner)',
-        'Accept-Language': 'nl,en,fr,de',
-      },
-    });
+    const res = await fetch(url, { headers: NOMINATIM_HEADERS });
 
     if (!res.ok) {
       return NextResponse.json({ error: `OpenStreetMap fout ${res.status}` }, { status: 502 });

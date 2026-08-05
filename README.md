@@ -11,7 +11,7 @@ Gebouwd met **Next.js 15** + **Upstash Redis** voor Vercel deployment.
 - 🗺️ Kaartweergave (Leaflet) met verblijf-markers, activiteit-markers, filter per verblijf of per dag, en dagroutes met afstand/rijtijd
 - 🎯 Kleine set generieke startactiviteiten (zwemmen, wandelen, markt, BBQ…) + onbeperkt eigen activiteiten met locatie
 - ✅ Auto & documenten-checklist en 🎒 inpaklijst — beide gedeeld, met **"Alle vinkjes resetten"** zodat je lijsten herbruikt bij de volgende vakantie
-- ⭐ **Verblijvenlogboek** (`/verblijven`): alle plekken waar je hebt gelogeerd op één kaart, met bezoekdatum, foto's, korte review en een cijfer van 1 tot 10. Je haalt de huidige reis met één knop binnen, en oude vakanties voeg je met de hand toe
+- ⭐ **Verblijvenlogboek** (`/verblijven`): alle plekken waar je hebt gelogeerd op één kaart, met bezoekdatum, soort verblijf (camping met tent/caravan/camper/stacaravan, hotel, B&B, Airbnb of anders), foto's, korte review en een cijfer van 1 tot 10. Het land wordt automatisch uit de locatie afgeleid. Zoeken kan op land, soort en minimumcijfer — de kaart filtert mee. Je haalt de huidige reis met één knop binnen, en oude vakanties voeg je met de hand toe
 - 🔄 **"Nieuwe vakantie starten"**: wist planning en reisgegevens, maar laat checklist- en inpaklijst-items staan
 - 👨‍👩‍👧‍👦 Server-side opslag: iedereen ziet dezelfde planning ("Laatst bijgewerkt door…")
 - 🔒 Optionele familie-PIN voor toegangsbeperking
@@ -139,6 +139,7 @@ Open [http://localhost:3000](http://localhost:3000).
   - `POST /api/verblijven/upload` — geeft een uploadtoken af voor Vercel Blob
   - `DELETE /api/verblijven/foto` — verwijdert een foto uit Blob
   - `GET /api/geocode?q=…` — wereldwijde locatiezoeker (Nominatim, rate-limited)
+  - `GET /api/geocode?lat=…&lng=…` — coördinaten → land (voor het verblijvenlogboek)
   - `POST /api/route` — dagroute via ORS of OSRM
 - Sync: wijzigingen worden 500 ms na de laatste actie naar de server gestuurd. Bij window-focus wordt automatisch opnieuw opgehaald.
 - Conflictresolutie: last-write-wins. Voor een gezin is dat prima.
@@ -182,6 +183,7 @@ vakantieplanner/
 │   ├── data.js                    # tripConfig-logica, buildDays, categorieën
 │   ├── maps.js                    # Maps-links, coördinaten, PIN-helper
 │   ├── stayLog.js                 # Client-kant van het verblijvenlogboek
+│   ├── stayTypes.js               # Soorten verblijf + landhulpjes (ook server-side)
 │   ├── redis.js                   # Upstash Redis client wrapper
 │   └── useRoute.js                # Route-fetch helper
 ├── CLAUDE.md                      # Architectuur en valkuilen
