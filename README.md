@@ -11,6 +11,7 @@ Gebouwd met **Next.js 15** + **Upstash Redis** voor Vercel deployment.
 - 🗺️ Kaartweergave (Leaflet) met verblijf-markers, activiteit-markers, filter per verblijf of per dag, en dagroutes met afstand/rijtijd
 - 🎯 Kleine set generieke startactiviteiten (zwemmen, wandelen, markt, BBQ…) + onbeperkt eigen activiteiten met locatie
 - ✅ Auto & documenten-checklist en 🎒 inpaklijst — beide gedeeld, met **"Alle vinkjes resetten"** zodat je lijsten herbruikt bij de volgende vakantie
+- ⭐ **Verblijvenlogboek** (`/verblijven`): alle plekken waar je hebt gelogeerd op één kaart, met bezoekdatum, foto's, korte review en een cijfer van 1 tot 10. Je haalt de huidige reis met één knop binnen, en oude vakanties voeg je met de hand toe
 - 🔄 **"Nieuwe vakantie starten"**: wist planning en reisgegevens, maar laat checklist- en inpaklijst-items staan
 - 👨‍👩‍👧‍👦 Server-side opslag: iedereen ziet dezelfde planning ("Laatst bijgewerkt door…")
 - 🔒 Optionele familie-PIN voor toegangsbeperking
@@ -78,7 +79,18 @@ De kaart toont per dag een route met afstand en rijtijd. Standaard gebruikt de a
 1. Maak een gratis key aan op [openrouteservice.org](https://openrouteservice.org/dev/#/signup)
 2. Voeg in Vercel toe: `ORS_API_KEY` = `jouw-key`
 
-### 7. Redeploy
+### 7. (Optioneel) Vercel Blob voor foto's bij verblijven
+
+Het verblijvenlogboek kan foto's per verblijf bewaren. Die gaan niet in Redis — dat is voor kleine JSON-documenten — maar in Vercel Blob:
+
+1. Ga in je Vercel-project naar **Storage** → **Create Database** → **Blob**
+2. Koppel de store aan dit project
+
+`BLOB_READ_WRITE_TOKEN` wordt daarna automatisch gezet. Sla je deze stap over, dan werkt de hele pagina gewoon; alleen het uploaden van een foto geeft dan een nette foutmelding.
+
+> **Let op:** de foto's krijgen een publiek leesbare (maar onraadbare) URL. Wie de link heeft, kan de foto zien — ook zonder de familie-PIN. Voor vakantiekiekjes is dat meestal prima; zet er geen dingen in die echt privé moeten blijven.
+
+### 8. Redeploy
 
 1. Ga naar **Deployments** → klik op de laatste deploy → **Redeploy**
 2. Wacht ~1 minuut → klaar!
@@ -116,12 +128,16 @@ Open [http://localhost:3000](http://localhost:3000).
   - `locationOverrides`: aangepaste locaties voor standaard-activiteiten
   - `updatedAt` + `updatedBy` voor de "laatst bijgewerkt" indicator
 - Checklist en inpaklijst hebben eigen keys: `planner:checklist` en `planner:inpakken`
+- Het verblijvenlogboek staat onder `planner:verblijven`, **bewust apart van `planner:trip`**: dat document wordt gewist bij "Nieuwe vakantie starten", en het logboek moet die reset juist overleven. Foto's staan niet in Redis maar in Vercel Blob; per foto bewaart het logboek alleen de URL
 - **Migratie vanaf de oude Vogezen-2026 versie**: bij de eerste lees-actie valt de app automatisch terug op de oude keys (`vosges:family-plan`, `vogezen2026:checklist`, `vogezen2026:inpakken`), zodat bestaande data behouden blijft. Bij de eerste schrijf-actie wordt alles onder de nieuwe keys opgeslagen.
 - Dagen worden **niet** opgeslagen maar telkens afgeleid uit `tripConfig` — periode of verblijven wijzigen werkt dus direct door, en geplande activiteiten op datums binnen de nieuwe periode blijven staan.
 - API routes:
   - `GET /api/plan` — haalt huidige staat op
   - `PUT /api/plan` — overschrijft de hele staat (incl. tripConfig)
   - `GET/POST /api/checklist` en `/api/inpakken` — gedeelde lijsten
+  - `GET/POST /api/verblijven` — het verblijvenlogboek
+  - `POST /api/verblijven/upload` — geeft een uploadtoken af voor Vercel Blob
+  - `DELETE /api/verblijven/foto` — verwijdert een foto uit Blob
   - `GET /api/geocode?q=…` — wereldwijde locatiezoeker (Nominatim, rate-limited)
   - `POST /api/route` — dagroute via ORS of OSRM
 - Sync: wijzigingen worden 500 ms na de laatste actie naar de server gestuurd. Bij window-focus wordt automatisch opnieuw opgehaald.
@@ -133,27 +149,43 @@ Open [http://localhost:3000](http://localhost:3000).
 vakantieplanner/
 ├── app/
 │   ├── api/
-│   │   ├── plan/route.js       # GET + PUT: tripConfig + planning
-│   │   ├── checklist/route.js  # Gedeelde checklist
-│   │   ├── inpakken/route.js   # Gedeelde inpaklijst
-│   │   ├── geocode/route.js    # Locatiezoeker (Nominatim)
-│   │   └── route/route.js      # Routeberekening (ORS/OSRM)
+│   │   ├── plan/route.js          # GET + PUT: tripConfig + planning
+│   │   ├── checklist/route.js     # Gedeelde checklist
+│   │   ├── inpakken/route.js      # Gedeelde inpaklijst
+│   │   ├── verblijven/route.js    # Verblijvenlogboek
+│   │   ├── verblijven/upload/     # Uploadtoken voor Vercel Blob
+│   │   ├── verblijven/foto/       # Foto verwijderen uit Blob
+│   │   ├── geocode/route.js       # Locatiezoeker (Nominatim)
+│   │   ├── resolve-maps/route.js  # Google Maps-link → naam + coördinaten
+│   │   ├── suggest/route.js       # Omgevingssuggesties (Geoapify/Overpass)
+│   │   ├── hiking/route.js        # Wandelroutes uit OpenStreetMap
+│   │   ├── whats-here/route.js    # POI's rond een kaartklik
+│   │   └── route/route.js         # Routeberekening (ORS/OSRM)
 │   ├── checklist/page.jsx
+│   ├── dag/page.jsx
 │   ├── inpakken/page.jsx
 │   ├── kaart/page.jsx
-│   ├── layout.jsx              # Root layout met fonts
-│   ├── page.jsx                # Server-rendered home page
-│   └── globals.css             # Reset + Google Fonts
+│   ├── verblijven/page.jsx
+│   ├── layout.jsx                 # Root layout met fonts + PWA-metadata
+│   ├── manifest.js                # Web App Manifest
+│   ├── page.jsx                   # Server-rendered home page
+│   └── globals.css                # Reset + Google Fonts
 ├── components/
-│   ├── Planner.jsx             # Hoofdplanner incl. "Reis instellen"
-│   ├── MapView.jsx             # Leaflet-kaart
-│   ├── Checklist.jsx           # Auto & documenten
-│   └── PackingList.jsx         # Inpaklijst
+│   ├── Planner.jsx                # Hoofdplanner incl. "Reis instellen"
+│   ├── MapView.jsx                # Leaflet-kaart
+│   ├── DayOverview.jsx            # Dag-voor-dag met route en GPX
+│   ├── StayLog.jsx                # Verblijvenlogboek
+│   ├── LocationPicker.jsx         # Gedeeld locatieveld (adres/Maps-link)
+│   ├── Checklist.jsx              # Auto & documenten
+│   └── PackingList.jsx            # Inpaklijst
 ├── lib/
-│   ├── data.js                 # tripConfig-logica, buildDays, categorieën
-│   ├── redis.js                # Upstash Redis client wrapper
-│   └── useRoute.js             # Route-fetch helper
-├── jsconfig.json               # @/ path alias
+│   ├── data.js                    # tripConfig-logica, buildDays, categorieën
+│   ├── maps.js                    # Maps-links, coördinaten, PIN-helper
+│   ├── stayLog.js                 # Client-kant van het verblijvenlogboek
+│   ├── redis.js                   # Upstash Redis client wrapper
+│   └── useRoute.js                # Route-fetch helper
+├── CLAUDE.md                      # Architectuur en valkuilen
+├── jsconfig.json                  # @/ path alias
 ├── next.config.mjs
 ├── package.json
 └── .env.example

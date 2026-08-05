@@ -75,6 +75,7 @@ app/
   dag/page.jsx            → DayOverview    (dag-voor-dag, met autoroute + GPX)
   inpakken/page.jsx       → PackingList
   checklist/page.jsx      → Checklist
+  verblijven/page.jsx     → StayLog        (logboek: kaart, cijfer, review, foto's)
   layout.jsx, manifest.js, icon.svg, globals.css   (PWA + huisstijl)
   api/
     plan/       GET/PUT   hoofddocument (dagen, activiteiten, reisconfig)
@@ -86,14 +87,20 @@ app/
     hiking/     POST      wandelroutes uit OSM-relaties
     resolve-maps/ POST    Google Maps-link → naam + coördinaten
     whats-here/ GET/POST  POI's rond een aangeklikt kaartpunt
-components/   Planner.jsx (~4200 r.), MapView.jsx, DayOverview.jsx,
-              PackingList.jsx, Checklist.jsx
-lib/          data.js (palet, categorieën, buildDays, overrides), redis.js, useRoute.js
+    verblijven/ GET/POST  verblijvenlogboek
+    verblijven/upload/    uploadtoken voor Vercel Blob
+    verblijven/foto/      foto verwijderen uit Blob (DELETE)
+components/   Planner.jsx (~4000 r.), MapView.jsx, DayOverview.jsx,
+              PackingList.jsx, Checklist.jsx, StayLog.jsx, LocationPicker.jsx
+lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
+              (Maps-links + PIN), stayLog.js, redis.js, useRoute.js
 ```
 
 `components/Planner.jsx` is bewust één groot bestand: alle sheets (`PickDaySheet`,
 `SuggestionsSheet`, `PasteLinkSheet`, `WhatsHereSheet`, `TripSettingsSheet`, …) staan
 erin als lokale componenten. Splits het niet zonder reden — de state zit dicht op elkaar.
+`LocationPicker` is wél eruit gehaald, omdat het verblijvenlogboek hetzelfde veld nodig
+heeft; hergebruik op een tweede pagina is de drempel.
 
 ## Datamodel
 
@@ -104,10 +111,16 @@ Drie losse Redis-documenten, elk één JSON-blob:
 | `planner:trip` | `{ plan, customActivities, locationOverrides, tripConfig, suggestExclusions, updatedAt, updatedBy }` |
 | `planner:inpakken` | `{ categories:[{id,name}], items:[{id,categoryId,label,qty,checked,packed,important,note}], updatedBy, updatedAt }` |
 | `planner:checklist` | `{ checked:{}, updatedBy, updatedAt }` |
+| `planner:verblijven` | `{ stays:[{id,name,locationLabel,coords,startDate,endDate,periodLabel,tripTitle,score,review,photos,source}], updatedBy, updatedAt }` |
 
-Elk van de drie leest eenmalig een **legacy key** (`vosges:family-plan`,
+De eerste drie lezen eenmalig een **legacy key** (`vosges:family-plan`,
 `vogezen2026:*`) als de nieuwe leeg is. Niet weghalen — dat is de migratie van de oude
 Vogezen-versie.
+
+`planner:verblijven` staat er bewust náást en niet ín `planner:trip`: dat laatste
+document wordt gewist bij "Nieuwe vakantie starten", en het logboek moet die reset juist
+overleven. Foto's staan niet in Redis maar in **Vercel Blob**; het document bewaart per
+foto alleen `url` en `pathname` (die laatste heb je nodig om hem te kunnen verwijderen).
 
 Kern van het hoofddocument:
 
@@ -192,7 +205,15 @@ routes: neem die check over, anders is dat een gat.
 Zonder dat cachet Vercel de GET en krijg je na opslaan een oude versie terug. Ook op
 `/kaart` (leest env var op de server).
 
-**12. Bewust géén service worker.**
+**12. Foto's: uploaden gaat buiten de server om.**
+De browser praat rechtstreeks met Vercel Blob; `/api/verblijven/upload` geeft alleen een
+token af. Twee dingen om te onthouden: `upload()` kan geen eigen headers meesturen, dus de
+familie-PIN gaat mee als `clientPayload` en wordt in `onBeforeGenerateToken` gecontroleerd.
+En `onUploadCompleted` vuurt **niet lokaal** (Blob moet die callback publiek kunnen
+bereiken), dus hang er geen opslag aan — de client schrijft de teruggekregen URL zelf weg.
+Foto's worden vóór het uploaden in de browser verkleind tot max 1600 px.
+
+**13. Bewust géén service worker.**
 De PWA is manifest + iconen, meer niet. Voeg er geen offline-caching aan toe zonder dat
 expliciet te bespreken: gecachete JS naast een gedeeld Redis-document geeft precies de
 "waarom zie ik oude data"-klasse bugs die punt 4 probeert te vermijden.

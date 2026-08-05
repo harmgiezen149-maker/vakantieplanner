@@ -5,8 +5,8 @@ import Link from 'next/link';
 import {
   Plus, X, Trash2, Sparkles, Calendar as CalendarIcon,
   ChevronRight, RefreshCw, User, Wifi, WifiOff, Check, AlertCircle, Lock, MapPin, Map as MapIcon,
-  Pencil, Search, Loader2, Car, ChevronUp, ChevronDown, CheckSquare, Backpack, ExternalLink,
-  Settings, Home, CalendarRange, Compass, Maximize2, Minimize2, EyeOff,
+  Pencil, Loader2, Car, ChevronUp, ChevronDown, CheckSquare, Backpack, ExternalLink,
+  Settings, Home, CalendarRange, Compass, Maximize2, Minimize2, EyeOff, Star,
 } from 'lucide-react';
 import {
   COLORS, CATEGORIES, CATEGORY_ORDER, DEFAULT_ACTIVITIES,
@@ -14,17 +14,15 @@ import {
   getMapsLink, applyLocationOverride, formatDistance, formatDuration,
 } from '@/lib/data';
 import { useRoute } from '@/lib/useRoute';
+import LocationPicker from '@/components/LocationPicker';
+import {
+  getPin, setPin, apiResolveMaps,
+  isGoogleMapsUrl, parseMapsUrlClient,
+} from '@/lib/maps';
+import { archiveTripStays } from '@/lib/stayLog';
 
 // ============ API CLIENT ============
 
-const getPin = () => {
-  if (typeof window === 'undefined') return '';
-  return localStorage.getItem('planner-pin') || '';
-};
-const setPin = (pin) => {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem('planner-pin', pin);
-};
 const getName = () => {
   if (typeof window === 'undefined') return '';
   return localStorage.getItem('planner-name') || '';
@@ -54,14 +52,6 @@ async function apiPut(plan, customActivities, locationOverrides, tripConfig, sug
     body: JSON.stringify({ plan, customActivities, locationOverrides, tripConfig, suggestExclusions, updatedBy: name || null }),
   });
   if (!res.ok) throw new Error(res.status === 401 ? 'unauthorized' : `HTTP ${res.status}`);
-  return res.json();
-}
-
-async function apiGeocode(q) {
-  const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`, {
-    headers: { 'X-Family-Pin': getPin() },
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
@@ -246,6 +236,7 @@ const Header = ({ tripConfig, stays, totalDays, stats, name, onNameChange, syncS
             { href: '/kaart', icon: <MapIcon size={18} />, label: 'Kaart' },
             { href: '/checklist', icon: <CheckSquare size={18} />, label: 'Auto & documenten' },
             { href: '/inpakken', icon: <Backpack size={18} />, label: 'Inpaklijst' },
+            { href: '/verblijven', icon: <Star size={18} />, label: 'Verblijven' },
           ].map((b) => (
             <Link
               key={b.href}
@@ -1238,256 +1229,9 @@ const PickDaySheet = ({ activity, plan, days, onPick, onClose }) => (
   </Sheet>
 );
 
-// ============ LOCATION PICKER ============
-// Herbruikbaar veld met OpenStreetMap autocomplete
-
-// ── Google Maps-links en coördinaten herkennen ──────────────────────
-// "48.123456, 6.654321" (Google Maps: rechtsklik → coördinaten kopiëren)
-const COORDS_RE = /^\s*(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)\s*$/;
-
-const isGoogleMapsUrl = (txt) => {
-  try {
-    const u = new URL(txt.trim());
-    return /(^|\.)google\.[a-z.]+$/.test(u.hostname) && u.pathname.includes('/maps')
-      || ['maps.app.goo.gl', 'goo.gl', 'g.co', 'maps.google.com'].includes(u.hostname);
-  } catch { return false; }
-};
-
-const isShortMapsUrl = (txt) => {
-  try {
-    const u = new URL(txt.trim());
-    return ['maps.app.goo.gl', 'goo.gl', 'g.co'].includes(u.hostname);
-  } catch { return false; }
-};
-
-// Naam + coördinaten uit een volledige Maps-URL (client-side variant)
-const parseMapsUrlClient = (urlStr) => {
-  let name = null, coords = null;
-  const placeMatch = /\/place\/([^/@?]+)/.exec(urlStr);
-  if (placeMatch) {
-    try { name = decodeURIComponent(placeMatch[1]).replace(/\+/g, ' ').trim(); } catch {}
-  }
-  const pin = /!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)/.exec(urlStr);
-  const at = /@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/.exec(urlStr);
-  const q = /[?&]q=(-?\d{1,2}\.\d+)(?:,|%2C)(-?\d{1,3}\.\d+)/.exec(urlStr);
-  const m = pin || at || q;
-  if (m) {
-    const lat = Number(m[1]), lng = Number(m[2]);
-    if (isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
-      coords = [lat, lng];
-    }
-  }
-  return { name, coords };
-};
-
-async function apiResolveMaps(url) {
-  const res = await fetch('/api/resolve-maps', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Family-Pin': getPin() },
-    body: JSON.stringify({ url }),
-  });
-  if (!res.ok) throw new Error('resolve_failed');
-  return res.json();
-}
-
-const LocationPicker = ({ value, onChange, accentColor = COLORS.forest, placeholder }) => {
-  // value shape: { label, coords: [lat,lng] } | null
-  const [query, setQuery] = useState(value?.label || '');
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [showResults, setShowResults] = useState(false);
-  const [pickedCoords, setPickedCoords] = useState(value?.coords || null);
-  const searchTimer = useRef(null);
-
-  useEffect(() => {
-    setQuery(value?.label || '');
-    setPickedCoords(value?.coords || null);
-  }, [value?.label, value?.coords?.[0], value?.coords?.[1]]);
-
-  const doSearch = useCallback(async (q) => {
-    if (!q || q.length < 2) {
-      setResults([]); setLoading(false); return;
-    }
-    setLoading(true);
-    try {
-      const data = await apiGeocode(q);
-      setResults(data.results || []);
-    } catch (e) {
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // Pas een herkende plek (uit link/coördinaten) direct toe
-  const applyParsed = ({ name, coords }) => {
-    const label = name || `${coords[0].toFixed(5)}, ${coords[1].toFixed(5)}`;
-    setQuery(label);
-    setPickedCoords(coords);
-    setShowResults(false);
-    setResults([]);
-    setLoading(false);
-    onChange({ label, coords, fullName: name || label });
-  };
-
-  const onChangeText = async (txt) => {
-    setQuery(txt);
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    if (pickedCoords && txt !== value?.label) setPickedCoords(null);
-
-    // 1. Kale coördinaten geplakt ("48.12345, 6.65432")
-    const cm = COORDS_RE.exec(txt);
-    if (cm) {
-      applyParsed({ name: null, coords: [Number(cm[1]), Number(cm[2])] });
-      return;
-    }
-
-    // 2. Google Maps-link geplakt
-    if (isGoogleMapsUrl(txt)) {
-      setShowResults(false);
-      setResults([]);
-      const direct = parseMapsUrlClient(txt);
-      if (direct.coords) {
-        applyParsed(direct);
-        return;
-      }
-      if (isShortMapsUrl(txt)) {
-        // Korte link → server lost de redirect op
-        setLoading(true);
-        try {
-          const data = await apiResolveMaps(txt.trim());
-          applyParsed(data);
-        } catch {
-          setLoading(false);
-          setQuery('');
-          window.alert('Kon deze Maps-link niet uitlezen. Open de link in je browser en plak de volledige URL uit de adresbalk, of plak de coördinaten (rechtsklik op de plek in Google Maps).');
-        }
-        return;
-      }
-      window.alert('Geen locatie gevonden in deze link. Plak de volledige Maps-URL van een plek, of de coördinaten.');
-      return;
-    }
-
-    // 3. Gewone zoekterm
-    setShowResults(true);
-    searchTimer.current = setTimeout(() => doSearch(txt), 400);
-  };
-
-  const onPick = (r) => {
-    const coords = [r.lat, r.lng];
-    setQuery(r.shortName);
-    setPickedCoords(coords);
-    setShowResults(false);
-    setResults([]);
-    onChange({ label: r.shortName, coords, fullName: r.name });
-  };
-
-  const onClear = () => {
-    setQuery(''); setPickedCoords(null); setResults([]); setShowResults(false);
-    onChange(null);
-  };
-
-  const inputStyle = {
-    width: '100%', padding: '12px 40px 12px 38px',
-    background: COLORS.creamSoft,
-    border: `1px solid ${pickedCoords ? accentColor : COLORS.hairline}`,
-    borderRadius: 10,
-    fontFamily: "'DM Sans', sans-serif", fontSize: 14,
-    color: COLORS.charcoal, outline: 'none', boxSizing: 'border-box',
-  };
-
-  return (
-    <div style={{ position: 'relative' }}>
-      <div style={{ position: 'relative' }}>
-        <Search
-          size={15}
-          style={{
-            position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
-            color: COLORS.inkLight, pointerEvents: 'none',
-          }}
-        />
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => onChangeText(e.target.value)}
-          onFocus={() => setShowResults(true)}
-          placeholder={placeholder || "Bv. 'Camping de la Plage' of 'Annecy'"}
-          style={inputStyle}
-        />
-        {loading && (
-          <Loader2
-            size={15}
-            style={{
-              position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
-              color: COLORS.inkLight,
-              animation: 'spin 1s linear infinite',
-            }}
-          />
-        )}
-        {!loading && query && (
-          <button
-            onClick={onClear}
-            type="button"
-            style={{
-              position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
-              border: 'none', background: 'transparent', cursor: 'pointer',
-              color: COLORS.inkLight, padding: 4,
-              display: 'flex', alignItems: 'center',
-            }}
-            aria-label="Wis"
-          ><X size={14} /></button>
-        )}
-      </div>
-
-      {pickedCoords && !showResults && (
-        <div style={{
-          marginTop: 6, fontSize: 11,
-          color: accentColor, display: 'flex', alignItems: 'center', gap: 4,
-        }}>
-          <MapPin size={11} /> Locatie ingesteld
-        </div>
-      )}
-
-      {showResults && results.length > 0 && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, right: 0,
-          marginTop: 4, zIndex: 60,
-          background: COLORS.cream,
-          border: `1px solid ${COLORS.hairline}`,
-          borderRadius: 10,
-          boxShadow: '0 6px 16px rgba(31,41,34,0.12)',
-          maxHeight: 240, overflowY: 'auto',
-        }}>
-          {results.map((r, i) => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => onPick(r)}
-              style={{
-                display: 'block', width: '100%', textAlign: 'left',
-                padding: '10px 12px',
-                background: 'transparent', border: 'none',
-                borderBottom: i < results.length - 1 ? `1px solid ${COLORS.hairline}` : 'none',
-                cursor: 'pointer',
-                fontFamily: "'DM Sans', sans-serif",
-              }}
-            >
-              <div style={{ fontSize: 13, color: COLORS.charcoal, fontWeight: 500 }}>
-                {r.shortName}
-              </div>
-              <div style={{
-                fontSize: 11, color: COLORS.inkLight, marginTop: 2,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>
-                {r.name}
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
+// LocationPicker en de bijbehorende maps-helpers staan sinds het
+// verblijvenlogboek in components/LocationPicker.jsx en lib/maps.js,
+// omdat ze nu op twee pagina’s worden gebruikt.
 
 // ============ TRIP SETTINGS SHEET ============
 // Hier stel je titel, periode en verblijven in — het hart van de
@@ -1927,35 +1671,54 @@ const LocationEditSheet = ({ activity, currentOverride, onSave, onClear, onClose
   );
 };
 
-const ConfirmSheet = ({ title, message, confirmText, onConfirm, onClose }) => (
-  <Sheet onClose={onClose} title={title}>
-    <div style={{ padding: '8px 20px 24px' }}>
-      <p style={{ color: COLORS.ink, fontSize: 14, lineHeight: 1.5, marginBottom: 18 }}>
-        {message}
-      </p>
-      <div style={{ display: 'flex', gap: 10 }}>
-        <button
-          onClick={onClose}
-          style={{
-            flex: 1, padding: 12, background: 'transparent',
-            color: COLORS.ink, border: `1px solid ${COLORS.hairline}`,
-            borderRadius: 10, fontFamily: "'DM Sans', sans-serif",
-            fontSize: 14, fontWeight: 500, cursor: 'pointer',
-          }}
-        >Annuleer</button>
-        <button
-          onClick={() => { onConfirm(); onClose(); }}
-          style={{
-            flex: 1, padding: 12, background: COLORS.wine,
-            color: COLORS.cream, border: 'none', borderRadius: 10,
-            fontFamily: "'DM Sans', sans-serif",
-            fontSize: 14, fontWeight: 600, cursor: 'pointer',
-          }}
-        >{confirmText}</button>
+// Met altText/onAlt krijg je een derde knop: een tweede manier om door te
+// gaan (bv. "wel starten, niet bewaren"). Dan stapelen de knoppen, want drie
+// naast elkaar wordt te krap op een telefoon.
+const ConfirmSheet = ({ title, message, confirmText, onConfirm, onClose, altText, onAlt }) => {
+  const cancelStyle = {
+    flex: 1, padding: 12, background: 'transparent',
+    color: COLORS.ink, border: `1px solid ${COLORS.hairline}`,
+    borderRadius: 10, fontFamily: "'DM Sans', sans-serif",
+    fontSize: 14, fontWeight: 500, cursor: 'pointer',
+  };
+  const confirmStyle = {
+    flex: 1, padding: 12, background: COLORS.wine,
+    color: COLORS.cream, border: 'none', borderRadius: 10,
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: 14, fontWeight: 600, cursor: 'pointer',
+  };
+
+  return (
+    <Sheet onClose={onClose} title={title}>
+      <div style={{ padding: '8px 20px 24px' }}>
+        <p style={{ color: COLORS.ink, fontSize: 14, lineHeight: 1.5, marginBottom: 18 }}>
+          {message}
+        </p>
+        {altText ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <button onClick={() => { onConfirm(); onClose(); }} style={{ ...confirmStyle, flex: 'none' }}>
+              {confirmText}
+            </button>
+            <button
+              onClick={() => { onAlt(); onClose(); }}
+              style={{ ...cancelStyle, flex: 'none', borderColor: `${COLORS.lake}80`, color: COLORS.lake, fontWeight: 600 }}
+            >{altText}</button>
+            <button onClick={onClose} style={{ ...cancelStyle, flex: 'none', border: 'none' }}>
+              Annuleer
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={onClose} style={cancelStyle}>Annuleer</button>
+            <button onClick={() => { onConfirm(); onClose(); }} style={confirmStyle}>
+              {confirmText}
+            </button>
+          </div>
+        )}
       </div>
-    </div>
-  </Sheet>
-);
+    </Sheet>
+  );
+};
 
 // ============ "WAT LIGT HIER?" (klik op de kaart) ============
 
@@ -3990,6 +3753,37 @@ export default function Planner({ authRequired }) {
     });
   };
 
+  // Nieuwe vakantie starten, eventueel met de verblijven eerst in het logboek.
+  // Mislukt het archiveren, dan wissen we niets — anders raak je de verblijven
+  // kwijt zonder dat ze ergens bewaard zijn.
+  const archiveerEnStart = async (archiveren) => {
+    if (archiveren) {
+      try {
+        const r = await archiveTripStays(tripConfig, name);
+        if (r.added > 0) {
+          window.alert(
+            `${r.added} ${r.added === 1 ? 'verblijf' : 'verblijven'} bewaard in het logboek.` +
+            (r.skipped ? ` ${r.skipped} stond${r.skipped === 1 ? '' : 'en'} er al in.` : '') +
+            '\n\nJe vindt ze terug onder “Verblijven”.'
+          );
+        }
+      } catch (e) {
+        window.alert(
+          'Kon de verblijven niet bewaren in het logboek, dus er is niets gewist. ' +
+          'Probeer het zo nog eens.'
+        );
+        return;
+      }
+    }
+    setPlan({});
+    setCustomActivities([]);
+    setLocationOverrides({});
+    setSuggestExclusions([]);
+    setTripConfig(DEFAULT_TRIP_CONFIG);
+    // Open daarna direct de reisinstellingen
+    setTimeout(() => setSheet({ type: 'trip-settings' }), 0);
+  };
+
   const lastUpdateText = useMemo(() => {
     if (!serverUpdate.at) return null;
     const d = new Date(serverUpdate.at);
@@ -4199,20 +3993,20 @@ export default function Planner({ authRequired }) {
             });
           }}
           onNewVacation={() => {
+            const teArchiveren = (tripConfig.stays || []).length;
+            const basis = 'De planning en eigen activiteiten worden gewist. Daarna stel je de nieuwe periode en verblijven in. De inpaklijst en auto-checklist blijven staan.';
             setSheet({
               type: 'confirm',
               title: 'Nieuwe vakantie starten?',
-              message: 'De planning en eigen activiteiten worden gewist. Daarna stel je de nieuwe periode en verblijven in. De inpaklijst en auto-checklist blijven staan.',
-              confirmText: 'Nieuwe vakantie',
-              onConfirm: () => {
-                setPlan({});
-                setCustomActivities([]);
-                setLocationOverrides({});
-                setSuggestExclusions([]);
-                setTripConfig(DEFAULT_TRIP_CONFIG);
-                // Open daarna direct de reisinstellingen
-                setTimeout(() => setSheet({ type: 'trip-settings' }), 0);
-              },
+              message: teArchiveren
+                ? `${basis}\n\nJe hebt ${teArchiveren} ${teArchiveren === 1 ? 'verblijf' : 'verblijven'} ingesteld. Wil je ${teArchiveren === 1 ? 'dat' : 'die'} eerst bewaren in het verblijvenlogboek, zodat je er later een cijfer en foto's aan kunt hangen?`
+                : basis,
+              confirmText: teArchiveren ? 'Bewaren en starten' : 'Nieuwe vakantie',
+              onConfirm: teArchiveren
+                ? () => archiveerEnStart(true)
+                : () => archiveerEnStart(false),
+              altText: teArchiveren ? 'Starten zonder bewaren' : undefined,
+              onAlt: teArchiveren ? () => archiveerEnStart(false) : undefined,
             });
           }}
           onClose={() => setSheet(null)}
@@ -4225,6 +4019,8 @@ export default function Planner({ authRequired }) {
           message={sheet.message}
           confirmText={sheet.confirmText}
           onConfirm={sheet.onConfirm}
+          altText={sheet.altText}
+          onAlt={sheet.onAlt}
           onClose={() => setSheet(null)}
         />
       )}

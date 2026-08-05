@@ -24,6 +24,7 @@ export default function manifest() {
       { name: 'Kaart', url: '/kaart', description: 'Activiteiten op de kaart' },
       { name: 'Inpaklijst', url: '/inpakken', description: 'Wat gaat er mee' },
       { name: 'Auto & documenten', url: '/checklist', description: 'Voorbereiding' },
+      { name: 'Verblijven', url: '/verblijven', description: 'Waar we zijn geweest' },
     ],
   };
 }
