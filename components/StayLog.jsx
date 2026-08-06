@@ -12,7 +12,7 @@ import { getPin } from '@/lib/maps';
 import LocationPicker from '@/components/LocationPicker';
 import {
   uid, fetchStayLog, saveStayLog, archiveTripStays,
-  reverseCountry, countryFromAddress,
+  reverseCountry, countryFromAddress, groepeerReizen,
 } from '@/lib/stayLog';
 import {
   STAY_TYPES, stayTypeLabel, countryFlag,
@@ -188,7 +188,7 @@ function groepMarker(L, map, groep, onSelect) {
   return marker;
 }
 
-const StayMap = ({ stays, selectedId, onSelect }) => {
+const StayMap = ({ stays, reizen, selectedId, onSelect }) => {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const leafletRef = useRef(null);
@@ -273,6 +273,29 @@ const StayMap = ({ stays, selectedId, onSelect }) => {
       markersRef.current.forEach(m => m.remove());
       markersRef.current = [];
 
+      // Reisroutes eerst, zodat de markers er bovenop komen te liggen. Rechte
+      // lijnen tussen de verblijven in datumvolgorde — dit is een overzicht van
+      // waar je bent geweest, geen navigatie.
+      (reizen || []).forEach((reis) => {
+        const punten = reis.stays
+          .filter(s => Array.isArray(s.coords))
+          .map(s => s.coords);
+        if (punten.length < 2) return;
+        const lijn = L.polyline(punten, {
+          color: reis.kleur,
+          weight: 3,
+          opacity: 0.7,
+          dashArray: '6,7',
+          lineCap: 'round',
+        }).addTo(map);
+        lijn.bindPopup(
+          `<strong>${escapeHtml(reis.naam)}</strong>` +
+          (reis.periode ? `<br><span style="color:#5A6B8C">${escapeHtml(reis.periode)}</span>` : '') +
+          `<br>${reis.stays.length} verblijven`
+        );
+        markersRef.current.push(lijn);
+      });
+
       // Posities in schermpixels; alleen zo weet je wat visueel overlapt.
       const punten = withCoords.map(s => ({ s, p: map.latLngToContainerPoint(s.coords) }));
 
@@ -313,7 +336,7 @@ const StayMap = ({ stays, selectedId, onSelect }) => {
       fitKeyRef.current = key;
       fit(map, L, ptsRef.current);
     }
-  }, [stays, selectedId, ready, onSelect]);
+  }, [stays, reizen, selectedId, ready, onSelect]);
 
   // Bij in- of uitzoomen valt de groepering anders uit
   useEffect(() => {
@@ -403,6 +426,7 @@ export default function StayLog() {
   const [fCountry, setFCountry] = useState(null); // landcode, '' = onbekend
   const [fType, setFType] = useState('');
   const [fYear, setFYear] = useState('');         // '' = alle, '?' = onbekend
+  const [fTrip, setFTrip] = useState('');
   const [fMinScore, setFMinScore] = useState(0);
 
   const saveTimer = useRef(null);
@@ -703,7 +727,20 @@ export default function StayLog() {
     };
   }, [stays]);
 
-  const filterActief = fCountry !== null || fType !== '' || fYear !== '' || fMinScore > 0;
+  // Verblijven die in de tijd tegen elkaar aan liggen horen bij dezelfde
+  // vakantie. Wordt op de hele lijst berekend, niet op de gefilterde: anders
+  // zou een filter een reis in stukken hakken.
+  const alleReizen = useMemo(() => groepeerReizen(stays), [stays]);
+
+  // Van verblijf-id naar de reis waar het bij hoort
+  const reisVanStay = useMemo(() => {
+    const m = new Map();
+    alleReizen.forEach(r => r.stays.forEach(s => m.set(s.id, r)));
+    return m;
+  }, [alleReizen]);
+
+  const filterActief = fCountry !== null || fType !== '' || fYear !== ''
+    || fTrip !== '' || fMinScore > 0;
 
   const gefilterd = useMemo(() => {
     return stays.filter((s) => {
@@ -716,10 +753,21 @@ export default function StayLog() {
         const j = jarenVan(s);
         if (fYear === '?' ? j.length > 0 : !j.includes(fYear)) return false;
       }
+      if (fTrip && reisVanStay.get(s.id)?.id !== fTrip) return false;
       if (fMinScore > 0 && !(s.score != null && s.score >= fMinScore)) return false;
       return true;
     });
-  }, [stays, fCountry, fType, fYear, fMinScore]);
+  }, [stays, fCountry, fType, fYear, fTrip, fMinScore, reisVanStay]);
+
+  // Routes tekenen we alleen voor wat er nu te zien is, en alleen als er nog
+  // minstens twee verblijven van die reis over zijn.
+  const zichtbareReizen = useMemo(() => {
+    const zichtbaar = new Set(gefilterd.map(s => s.id));
+    return alleReizen
+      .filter(r => !r.los)
+      .map(r => ({ ...r, stays: r.stays.filter(s => zichtbaar.has(s.id)) }))
+      .filter(r => r.stays.length >= 2);
+  }, [alleReizen, gefilterd]);
 
   // Nieuwste bovenaan; verblijven zonder datum onderaan
   const sorted = useMemo(() => {
@@ -746,7 +794,9 @@ export default function StayLog() {
     };
   }, [gefilterd, stays.length]);
 
-  const wisFilters = () => { setFCountry(null); setFType(''); setFYear(''); setFMinScore(0); };
+  const wisFilters = () => {
+    setFCountry(null); setFType(''); setFYear(''); setFTrip(''); setFMinScore(0);
+  };
 
   const onSelectFromMap = useCallback((id) => {
     setSelectedId(id);
@@ -814,6 +864,8 @@ export default function StayLog() {
             fCountry={fCountry} setFCountry={setFCountry}
             fType={fType} setFType={setFType}
             fYear={fYear} setFYear={setFYear}
+            fTrip={fTrip} setFTrip={setFTrip}
+            reizen={alleReizen.filter(r => !r.los && r.stays.length > 1)}
             fMinScore={fMinScore} setFMinScore={setFMinScore}
             actief={filterActief}
             onWis={wisFilters}
@@ -821,7 +873,12 @@ export default function StayLog() {
         )}
 
         {stats.onMap > 0 && (
-          <StayMap stays={gefilterd} selectedId={selectedId} onSelect={onSelectFromMap} />
+          <StayMap
+            stays={gefilterd}
+            reizen={zichtbareReizen}
+            selectedId={selectedId}
+            onSelect={onSelectFromMap}
+          />
         )}
 
         <div style={S.actions}>
@@ -866,6 +923,7 @@ export default function StayLog() {
               selected={stay.id === selectedId}
               expanded={stay.id === expandedId}
               uploading={uploadingFor === stay.id}
+              reis={reisVanStay.get(stay.id)}
               cardRef={(el) => { cardRefs.current[stay.id] = el; }}
               onToggle={() => {
                 setExpandedId(id => id === stay.id ? null : stay.id);
@@ -1184,7 +1242,7 @@ const TypeSelect = ({ value, onChange, other, onOther }) => (
 
 const FilterBar = ({
   opties, fCountry, setFCountry, fType, setFType, fYear, setFYear,
-  fMinScore, setFMinScore, actief, onWis,
+  fTrip, setFTrip, reizen, fMinScore, setFMinScore, actief, onWis,
 }) => (
   <div style={S.filterBar}>
     <div style={S.filterHead}>
@@ -1236,6 +1294,20 @@ const FilterBar = ({
             </select>
           </div>
         )}
+      </div>
+    )}
+
+    {reizen.length > 0 && (
+      <div style={S.filterGroep}>
+        <div style={S.filterLabel}>Reis</div>
+        <select value={fTrip} onChange={(e) => setFTrip(e.target.value)} style={S.select}>
+          <option value="">Alle reizen</option>
+          {reizen.map(r => (
+            <option key={r.id} value={r.id}>
+              {r.naam} · {r.stays.length} verblijven
+            </option>
+          ))}
+        </select>
       </div>
     )}
 
@@ -1291,7 +1363,7 @@ const ScorePicker = ({ value, onChange }) => (
 // ── Eén verblijf in de lijst ────────────────────────────────────────
 
 const StayCard = ({
-  stay, selected, expanded, uploading, cardRef,
+  stay, selected, expanded, uploading, cardRef, reis,
   onToggle, onUpdate, onLocation, onBepaalLand, onRemove, onAddPhotos, onRemovePhoto,
 }) => {
   const fileRef = useRef(null);
@@ -1324,10 +1396,20 @@ const StayCard = ({
               landLabel,
               typeLabel,
               period || 'Datum onbekend',
-              stay.tripTitle || null,
               !stay.coords ? 'geen locatie' : null,
             ].filter(Boolean).join(' · ')}
           </div>
+          {/* Reis waar dit verblijf bij hoort. Het bolletje heeft de kleur van
+              de lijn op de kaart, zodat je ze aan elkaar kunt knopen. */}
+          {reis && reis.stays.length > 1 && (
+            <div style={S.reisRegel}>
+              <span style={{ ...S.reisStip, background: reis.kleur }} />
+              {reis.naam}
+              <span style={{ color: COLORS.inkLight }}>
+                · {reis.stays.length} verblijven
+              </span>
+            </div>
+          )}
         </div>
         {stay.photos?.length > 0 && (
           <div style={S.photoCount}><Camera size={12} /> {stay.photos.length}</div>
@@ -1590,6 +1672,14 @@ const S = {
     padding: '2px 6px', borderRadius: 6,
   },
   cardMeta: { fontSize: 12, color: COLORS.inkLight, marginTop: 2 },
+  reisRegel: {
+    display: 'flex', alignItems: 'center', gap: 5, marginTop: 3,
+    fontSize: 11, fontWeight: 600, color: COLORS.ink,
+  },
+  reisStip: {
+    width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+    display: 'inline-block',
+  },
   photoCount: {
     display: 'flex', alignItems: 'center', gap: 3,
     fontSize: 11, color: COLORS.inkLight, flexShrink: 0,

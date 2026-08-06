@@ -222,7 +222,16 @@ ervoor. `LocationPicker` leest bij plakken bovendien de ruwe kleminhoud via `onP
 omdat een invoerveld van één regel de regeleindes wegpoetst en naam en adres anders aan
 elkaar plakken.
 
-**14. Het land is afgeleid, niet ingetypt.**
+**14. Reizen zijn afgeleid, niet opgeslagen.**
+`groepeerReizen()` in `lib/stayLog.js` plakt verblijven aan elkaar die in de tijd tegen
+elkaar aan liggen (gat ≤ `MAX_GAT_DAGEN`, nu 5), met `tripTitle` als bovenliggende regel:
+twee verschillende gearchiveerde reizen worden nooit samengevoegd, ook niet als ze op
+elkaar aansluiten. Er staat dus **geen reis-id in het datamodel** — pas je de datums van
+een verblijf aan, dan verschuift de groepering vanzelf. Groeperen gebeurt op de hele
+lijst en niet op de gefilterde: anders hakt een filter een reis in stukken. De route op de
+kaart is een rechte lijn tussen de verblijven in datumvolgorde, geen echte rijroute.
+
+**15. Het land is afgeleid, niet ingetypt.**
 `STAY_TYPES` en de landhulpjes staan in `lib/stayTypes.js` — een module **zonder**
 `'use client'`, want `app/api/verblijven/route.js` valideert `type` tegen diezelfde lijst.
 Zet er dus geen fetch of localStorage in; dat hoort in `lib/stayLog.js`. Het land komt uit
@@ -231,7 +240,7 @@ twee bronnen: het `address`-object dat `/api/geocode` bij een zoekresultaat al m
 verzoek per seconde toe**, dus het bijwerken van bestaande verblijven gaat sequentieel met
 ~1,1 s ertussen — nooit `Promise.all`.
 
-**15. Bewust géén service worker.**
+**16. Bewust géén service worker.**
 De PWA is manifest + iconen, meer niet. Voeg er geen offline-caching aan toe zonder dat
 expliciet te bespreken: gecachete JS naast een gedeeld Redis-document geeft precies de
 "waarom zie ik oude data"-klasse bugs die punt 4 probeert te vermijden.
