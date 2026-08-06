@@ -86,10 +86,21 @@ const LocationPicker = ({ value, onChange, accentColor = COLORS.forest, placehol
         try {
           const data = await apiResolveMaps(link);
           applyParsed({ ...data, name: data.name || naamHint });
-        } catch {
+        } catch (e) {
           setLoading(false);
-          setQuery('');
-          window.alert('Kon deze Maps-link niet uitlezen. Open de link in je browser en plak de volledige URL uit de adresbalk, of plak de coördinaten (rechtsklik op de plek in Google Maps).');
+          // Het veld NIET leegmaken: je geplakte link is het enige wat je hebt
+          // om mee verder te kunnen, dus die laten we staan.
+          const d = e?.detail || {};
+          const opgelost = d.finalUrl;
+          window.alert(
+            'Kon deze Maps-link niet uitlezen.\n\n' +
+            (opgelost && opgelost !== link
+              ? `Google stuurde door naar:\n${opgelost}\n\nOpen die link, en plak de URL uit de adresbalk zodra de kaart geladen is.`
+              : 'Open de link in je browser (hij staat nog in het veld), wacht tot de kaart geladen is en plak dan de URL uit de adresbalk. Of plak de coördinaten: in Google Maps lang drukken op de plek → coördinaten kopiëren.') +
+            `\n\n[${e?.message || 'onbekend'}` +
+            (d.hops ? ` · ${d.hops} stap${d.hops === 1 ? '' : 'pen'}` : '') +
+            (d.status ? ` · status ${d.status}` : '') + ']'
+          );
         }
         return;
       }

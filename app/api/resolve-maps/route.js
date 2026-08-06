@@ -26,33 +26,105 @@ function rateLimited() {
   return false;
 }
 
+// Headers die zo veel mogelijk op een gewone telefoonbrowser lijken. Google
+// serveert onbekende clients vanaf datacenter-IP's nogal eens een
+// toestemmingspagina in plaats van de kaart; het CONSENT-koekje slaat die over.
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'nl-NL,nl;q=0.9,en;q=0.8',
+  'Cookie': 'CONSENT=YES+; SOCS=CAISAiAD',
+};
+
 // Haal naam + coördinaten uit een (volledige) Google Maps-URL
 function parseMapsUrl(urlStr) {
   let name = null;
   let coords = null;
 
-  const placeMatch = /\/place\/([^/@?]+)/.exec(urlStr);
-  if (placeMatch) {
-    try {
-      name = decodeURIComponent(placeMatch[1]).replace(/\+/g, ' ').trim();
-    } catch { /* laat null */ }
-  }
+  // Ook de percent-gedecodeerde variant meenemen: in een consent- of
+  // redirect-URL zit de echte kaart-URL vaak gecodeerd in ?continue=…
+  let ontcijferd = urlStr;
+  try { ontcijferd = decodeURIComponent(urlStr); } catch { /* laat staan */ }
+  const kandidaten = ontcijferd === urlStr ? [urlStr] : [urlStr, ontcijferd];
 
-  // Voorkeur: het exacte plek-anker (!3d..!4d..), dan kaartcentrum (@..),
-  // dan q=lat,lng
-  const pin = /!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)/.exec(urlStr);
-  const at = /@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/.exec(urlStr);
-  const q = /[?&]q=(-?\d{1,2}\.\d+)(?:,|%2C)(-?\d{1,3}\.\d+)/.exec(urlStr);
-  const m = pin || at || q;
-  if (m) {
-    const lat = Number(m[1]);
-    const lng = Number(m[2]);
-    if (isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
-      coords = [lat, lng];
+  for (const kand of kandidaten) {
+    if (!name) {
+      const placeMatch = /\/place\/([^/@?]+)/.exec(kand);
+      if (placeMatch) {
+        try {
+          const n = decodeURIComponent(placeMatch[1]).replace(/\+/g, ' ').trim();
+          // "Camping+X" is een naam; een kale coördinaat niet
+          if (n && !/^-?\d+\.\d+,\s*-?\d+\.\d+$/.test(n)) name = n;
+        } catch { /* laat null */ }
+      }
+    }
+
+    if (!coords) {
+      // Volgorde is de voorkeursvolgorde: het exacte plek-anker (!3d..!4d..)
+      // is nauwkeuriger dan het kaartcentrum (@..), en dat weer nauwkeuriger
+      // dan een losse zoekparameter.
+      const patronen = [
+        /!3d(-?\d{1,2}(?:\.\d+)?)!4d(-?\d{1,3}(?:\.\d+)?)/,
+        /@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/,
+        /[?&](?:q|query|ll|sll|center|daddr|destination)=(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)/,
+      ];
+      for (const re of patronen) {
+        const m = re.exec(kand);
+        if (!m) continue;
+        const lat = Number(m[1]);
+        const lng = Number(m[2]);
+        if (isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+          coords = [lat, lng];
+          break;
+        }
+      }
     }
   }
 
   return { name, coords };
+}
+
+// Redirects met de hand volgen in plaats van ze door fetch te laten afhandelen.
+// Dat is het hele punt: de volledige kaart-URL staat al in de Location-header
+// van de korte link, dus we hoeven de Maps-pagina zélf nooit op te halen — en
+// juist dáár zit de toestemmingspagina die het uitlezen liet stuklopen.
+// Geeft alle bezochte URL's terug plus de laatste respons (voor het geval we
+// alsnog in de HTML moeten kijken).
+async function volgRedirects(startUrl, maxHops = 6) {
+  const bezocht = [startUrl];
+  let huidig = startUrl;
+  let laatste = null;
+
+  for (let i = 0; i < maxHops; i++) {
+    let res;
+    try {
+      res = await fetch(huidig, {
+        redirect: 'manual',
+        headers: BROWSER_HEADERS,
+        signal: AbortSignal.timeout(9_000),
+      });
+    } catch {
+      break;
+    }
+    laatste = res;
+
+    const loc = res.headers.get('location');
+    if (res.status >= 300 && res.status < 400 && loc) {
+      try {
+        huidig = new URL(loc, huidig).toString();
+      } catch {
+        break;
+      }
+      bezocht.push(huidig);
+      // Zodra een hop coördinaten bevat zijn we klaar — verder kijken heeft
+      // geen zin en scheelt een verzoek aan Google.
+      if (parseMapsUrl(huidig).coords) break;
+      continue;
+    }
+    break;
+  }
+
+  return { bezocht, laatste };
 }
 
 export async function POST(request) {
@@ -85,26 +157,40 @@ export async function POST(request) {
   }
 
   // Volg de redirect-keten naar de volledige Maps-URL
-  let finalUrl = url.toString();
-  try {
-    const res = await fetch(finalUrl, {
-      redirect: 'follow',
-      headers: { 'User-Agent': 'Mozilla/5.0 (VakantiePlanner/1.0)' },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (res.url) finalUrl = res.url;
-    // Soms zit de echte URL nog in de HTML (consent-pagina's e.d.) —
-    // probeer dan een google.com/maps-URL uit de body te vissen.
-    if (!parseMapsUrl(finalUrl).coords) {
-      const text = await res.text();
-      const m = /https:\/\/www\.google\.[a-z.]+\/maps\/[^"'\\\s]+/.exec(text);
-      if (m) finalUrl = m[0].replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
-    }
-  } catch {
-    return Response.json({ error: 'resolve_failed' }, { status: 502 });
+  const { bezocht, laatste } = await volgRedirects(url.toString());
+
+  // Van achter naar voren kijken: de laatste hop is het meest specifiek
+  let finalUrl = bezocht[bezocht.length - 1];
+  let name = null;
+  let coords = null;
+  for (let i = bezocht.length - 1; i >= 0; i--) {
+    const uit = parseMapsUrl(bezocht[i]);
+    if (!name && uit.name) name = uit.name;
+    if (uit.coords) { coords = uit.coords; finalUrl = bezocht[i]; break; }
   }
 
-  let { name, coords } = parseMapsUrl(finalUrl);
+  // Nog niets? Dan alsnog in de HTML kijken — daar staat vaak een volledige
+  // kaart-URL, soms percent-gecodeerd in een continue=-parameter.
+  if (!coords && laatste) {
+    try {
+      const text = await laatste.text();
+      const kandidaten = [
+        /https:\/\/www\.google\.[a-z.]+\/maps\/[^"'\\\s<>]+/,
+        /https%3A%2F%2Fwww\.google\.[a-z.]+%2Fmaps%2F[^"'\\\s<>&]+/,
+      ];
+      for (const re of kandidaten) {
+        const m = re.exec(text);
+        if (!m) continue;
+        let kandidaat = m[0].replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
+        try { kandidaat = decodeURIComponent(kandidaat); } catch { /* laat staan */ }
+        const uit = parseMapsUrl(kandidaat);
+        if (!name && uit.name) name = uit.name;
+        if (uit.coords) { coords = uit.coords; finalUrl = kandidaat; break; }
+      }
+    } catch {
+      // body lezen mag mislukken
+    }
+  }
 
   // Vangnet: sommige deel-links uit de Maps-app komen uit op een URL met wél
   // een plaatsnaam maar zonder coördinaten. Zoek die naam dan op — beter een
@@ -132,7 +218,14 @@ export async function POST(request) {
   }
 
   if (!coords) {
-    return Response.json({ error: 'no_coords_found', finalUrl }, { status: 422 });
+    // finalUrl meesturen: dan kan de gebruiker hem alsnog met de hand plakken,
+    // en zie je in één oogopslag waar de keten strandde.
+    return Response.json({
+      error: 'no_coords_found',
+      finalUrl,
+      hops: bezocht.length,
+      status: laatste?.status ?? null,
+    }, { status: 422 });
   }
 
   // Verrijk met een omschrijving (type + plaats) via reverse-geocoding

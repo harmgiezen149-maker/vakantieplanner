@@ -1757,7 +1757,12 @@ const PasteLinkSheet = ({ onCreate, onClose }) => {
       });
       setState('preview');
     } catch (e) {
-      setErrMsg('Kon deze link niet uitlezen. Plak de volledige Google Maps-link van een plek (via Delen → Link kopiëren), of de coördinaten.');
+      const opgelost = e?.detail?.finalUrl;
+      setErrMsg(
+        opgelost && opgelost !== v
+          ? `Kon deze link niet uitlezen. Google stuurde door naar ${opgelost} — open die link en plak de URL uit de adresbalk zodra de kaart geladen is.`
+          : 'Kon deze link niet uitlezen. Open de link in je browser, wacht tot de kaart er staat en plak dan de URL uit de adresbalk. Of plak de coördinaten (lang drukken op de plek → coördinaten kopiëren).'
+      );
       setState('error');
     }
   };
