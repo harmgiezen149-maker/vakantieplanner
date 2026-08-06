@@ -31,6 +31,21 @@ const scoreColor = (score) => {
   return COLORS.wine;
 };
 
+// In welke jaren viel dit verblijf? Meestal één, bij een oudejaarsvakantie
+// twee. Verblijven zonder echte datums hebben vaak wél een jaartal in de vrije
+// periodetekst ("zomer 2003") — dat pikken we daaruit, anders vallen ze buiten
+// elk jaarfilter terwijl je precies weet wanneer het was.
+function jarenVan(stay) {
+  const jaren = new Set();
+  if (stay.startDate) jaren.add(stay.startDate.slice(0, 4));
+  if (stay.endDate) jaren.add(stay.endDate.slice(0, 4));
+  if (jaren.size === 0 && stay.periodLabel) {
+    const m = /\b(?:19|20)\d{2}\b/.exec(stay.periodLabel);
+    if (m) jaren.add(m[0]);
+  }
+  return [...jaren];
+}
+
 // ── Kaart met alle verblijven ───────────────────────────────────────
 // Zelfde patroon als DayOverview: Leaflet browser-only via dynamic import,
 // CSS als <link data-leaflet>, kaart opruimen in de cleanup.
@@ -387,6 +402,7 @@ export default function StayLog() {
   // Filters
   const [fCountry, setFCountry] = useState(null); // landcode, '' = onbekend
   const [fType, setFType] = useState('');
+  const [fYear, setFYear] = useState('');         // '' = alle, '?' = onbekend
   const [fMinScore, setFMinScore] = useState(0);
 
   const saveTimer = useRef(null);
@@ -664,6 +680,8 @@ export default function StayLog() {
   const filterOpties = useMemo(() => {
     const landen = new Map();
     const typen = new Set();
+    const jaren = new Set();
+    let zonderJaar = false;
     stays.forEach((s) => {
       if (s.country) {
         landen.set(s.countryCode || s.country, { code: s.countryCode, naam: s.country });
@@ -671,16 +689,21 @@ export default function StayLog() {
         landen.set('', { code: null, naam: 'Land onbekend' });
       }
       if (s.type) typen.add(s.type);
+      const j = jarenVan(s);
+      if (j.length) j.forEach(x => jaren.add(x));
+      else zonderJaar = true;
     });
     return {
       landen: [...landen.entries()]
         .map(([key, v]) => ({ key, ...v }))
         .sort((a, b) => (a.key === '' ? 1 : b.key === '' ? -1 : a.naam.localeCompare(b.naam))),
       typen: STAY_TYPES.filter(t => typen.has(t.id)),
+      jaren: [...jaren].sort((a, b) => b.localeCompare(a)), // nieuwste eerst
+      zonderJaar,
     };
   }, [stays]);
 
-  const filterActief = fCountry !== null || fType !== '' || fMinScore > 0;
+  const filterActief = fCountry !== null || fType !== '' || fYear !== '' || fMinScore > 0;
 
   const gefilterd = useMemo(() => {
     return stays.filter((s) => {
@@ -689,10 +712,14 @@ export default function StayLog() {
         if (key !== fCountry) return false;
       }
       if (fType && s.type !== fType) return false;
+      if (fYear) {
+        const j = jarenVan(s);
+        if (fYear === '?' ? j.length > 0 : !j.includes(fYear)) return false;
+      }
       if (fMinScore > 0 && !(s.score != null && s.score >= fMinScore)) return false;
       return true;
     });
-  }, [stays, fCountry, fType, fMinScore]);
+  }, [stays, fCountry, fType, fYear, fMinScore]);
 
   // Nieuwste bovenaan; verblijven zonder datum onderaan
   const sorted = useMemo(() => {
@@ -719,7 +746,7 @@ export default function StayLog() {
     };
   }, [gefilterd, stays.length]);
 
-  const wisFilters = () => { setFCountry(null); setFType(''); setFMinScore(0); };
+  const wisFilters = () => { setFCountry(null); setFType(''); setFYear(''); setFMinScore(0); };
 
   const onSelectFromMap = useCallback((id) => {
     setSelectedId(id);
@@ -786,6 +813,7 @@ export default function StayLog() {
             opties={filterOpties}
             fCountry={fCountry} setFCountry={setFCountry}
             fType={fType} setFType={setFType}
+            fYear={fYear} setFYear={setFYear}
             fMinScore={fMinScore} setFMinScore={setFMinScore}
             actief={filterActief}
             onWis={wisFilters}
@@ -1155,7 +1183,7 @@ const TypeSelect = ({ value, onChange, other, onOther }) => (
 // ── Filterbalk ──────────────────────────────────────────────────────
 
 const FilterBar = ({
-  opties, fCountry, setFCountry, fType, setFType,
+  opties, fCountry, setFCountry, fType, setFType, fYear, setFYear,
   fMinScore, setFMinScore, actief, onWis,
 }) => (
   <div style={S.filterBar}>
@@ -1185,15 +1213,29 @@ const FilterBar = ({
       </div>
     )}
 
-    {opties.typen.length > 0 && (
-      <div style={S.filterGroep}>
-        <div style={S.filterLabel}>Soort verblijf</div>
-        <select value={fType} onChange={(e) => setFType(e.target.value)} style={S.select}>
-          <option value="">Alle soorten</option>
-          {opties.typen.map(t => (
-            <option key={t.id} value={t.id}>{t.emoji} {t.label}</option>
-          ))}
-        </select>
+    {(opties.typen.length > 0 || opties.jaren.length > 0) && (
+      <div style={S.filterRij}>
+        {opties.jaren.length > 0 && (
+          <div style={{ ...S.filterGroep, flex: 1, minWidth: 0 }}>
+            <div style={S.filterLabel}>Jaar</div>
+            <select value={fYear} onChange={(e) => setFYear(e.target.value)} style={S.select}>
+              <option value="">Alle jaren</option>
+              {opties.jaren.map(j => <option key={j} value={j}>{j}</option>)}
+              {opties.zonderJaar && <option value="?">Jaar onbekend</option>}
+            </select>
+          </div>
+        )}
+        {opties.typen.length > 0 && (
+          <div style={{ ...S.filterGroep, flex: 1, minWidth: 0 }}>
+            <div style={S.filterLabel}>Soort verblijf</div>
+            <select value={fType} onChange={(e) => setFType(e.target.value)} style={S.select}>
+              <option value="">Alle soorten</option>
+              {opties.typen.map(t => (
+                <option key={t.id} value={t.id}>{t.emoji} {t.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
     )}
 
@@ -1471,6 +1513,7 @@ const S = {
     fontWeight: 600, color: COLORS.lake, flex: 1,
   },
   filterGroep: { display: 'flex', flexDirection: 'column', gap: 6 },
+  filterRij: { display: 'flex', gap: 10 },
   filterLabel: { fontSize: 11, color: COLORS.inkLight, fontWeight: 600 },
   chipRow: { display: 'flex', flexWrap: 'wrap', gap: 6 },
   chip: {
