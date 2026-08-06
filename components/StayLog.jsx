@@ -256,7 +256,7 @@ export default function StayLog() {
       setCountryProgress(null);
       if (gevonden.size === 0) return;
       // Eén keer opslaan aan het eind, op basis van de nieuwste staat
-      apply(latest.current.map(s => gevonden.has(s.id)
+      mutate(list => list.map(s => gevonden.has(s.id)
         ? { ...s, ...gevonden.get(s.id) }
         : s));
     })();
@@ -283,13 +283,18 @@ export default function StayLog() {
     }, 600);
   }, []);
 
-  const apply = (next) => {
+  // Muteren gaat ALTIJD via latest.current, nooit via de `stays` uit de
+  // closure. Anders draait een async callback — het land dat een seconde later
+  // binnenkomt — de lijst terug naar hoe die was toen de callback werd
+  // aangemaakt, en verdwijnt alles wat er intussen bij kwam.
+  const mutate = (fn) => {
+    const next = fn(latest.current);
     setStays(next);
     persist(next);
   };
 
   const updateStay = (id, patch) => {
-    apply(stays.map(s => s.id === id
+    mutate(list => list.map(s => s.id === id
       ? { ...s, ...patch, updatedAt: new Date().toISOString() }
       : s));
   };
@@ -343,7 +348,7 @@ export default function StayLog() {
       createdAt: now,
       updatedAt: now,
     };
-    apply([...stays, stay]);
+    mutate(list => [...list, stay]);
     setAdding(false);
     setExpandedId(stay.id);
     setSelectedId(stay.id);
@@ -362,7 +367,7 @@ export default function StayLog() {
     if (!window.confirm(`“${stay.name}” uit het logboek verwijderen?${fotoTekst}\n\nDit kan niet ongedaan worden gemaakt.`)) {
       return;
     }
-    apply(stays.filter(s => s.id !== stay.id));
+    mutate(list => list.filter(s => s.id !== stay.id));
     if (stay.photos?.length) {
       // Best effort: mislukt dit, dan is het verblijf wél weg en blijft
       // alleen het bestand in Blob achter.
@@ -396,10 +401,9 @@ export default function StayLog() {
         nieuwe.push({ id: uid(), url: result.url, pathname: result.pathname, w, h, caption: null });
       }
       if (nieuwe.length) {
-        const next = latest.current.map(s => s.id === stayId
+        mutate(list => list.map(s => s.id === stayId
           ? { ...s, photos: [...(s.photos || []), ...nieuwe], updatedAt: new Date().toISOString() }
-          : s);
-        apply(next);
+          : s));
       }
     } catch (e) {
       const msg = String(e?.message ?? e);
@@ -415,10 +419,9 @@ export default function StayLog() {
 
   const removePhoto = async (stayId, photo) => {
     if (!window.confirm('Deze foto verwijderen?')) return;
-    const next = stays.map(s => s.id === stayId
+    mutate(list => list.map(s => s.id === stayId
       ? { ...s, photos: (s.photos || []).filter(p => p.id !== photo.id) }
-      : s);
-    apply(next);
+      : s));
     try {
       await fetch('/api/verblijven/foto', {
         method: 'DELETE',
