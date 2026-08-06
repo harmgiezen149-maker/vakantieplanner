@@ -43,12 +43,144 @@ function fit(map, L, pts) {
   else if (pts.length > 1) map.fitBounds(L.latLngBounds(pts), { padding: [36, 36], maxZoom: 13 });
 }
 
+// Binnen hoeveel schermpixels twee verblijven als één bolletje worden getoond.
+// Iets meer dan de breedte van een speld, zodat ze samenvallen zodra ze elkaar
+// visueel zouden overlappen.
+const CLUSTER_PX = 46;
+
+// Verder inzoomen dan dit heeft geen zin; dan liggen de verblijven echt op
+// dezelfde plek en toont een klik een keuzelijst in plaats van nog een zoom.
+const MAX_CLUSTER_ZOOM = 17;
+
+// ── Losse speld ─────────────────────────────────────────────────────
+// Compact gehouden: op deze kaart staan alle verblijven van alle vakanties
+// tegelijk, niet één dag zoals op /kaart. Het gekozen verblijf wordt groter
+// getekend en komt bovenop te liggen.
+function losseMarker(L, map, s, selectedId, onSelect) {
+  const color = scoreColor(s.score);
+  const active = s.id === selectedId;
+  const label = s.score != null ? String(s.score).replace('.', ',') : '·';
+
+  const icon = L.divIcon({
+    className: '',
+    html: `
+      <div style="position: relative; width: 24px; height: 30px;
+                  filter: drop-shadow(0 1px 2px rgba(0,0,0,${active ? 0.45 : 0.3}));
+                  transform: scale(${active ? 1.35 : 1}); transform-origin: bottom center;">
+        <svg viewBox="0 0 32 40" width="24" height="30" xmlns="http://www.w3.org/2000/svg">
+          <path d="M16 0 C7 0 0 7 0 16 C0 25 16 40 16 40 C16 40 32 25 32 16 C32 7 25 0 16 0 Z"
+                fill="${color}" stroke="${active ? COLORS.charcoal : '#FAF3E1'}" stroke-width="2"/>
+          <circle cx="16" cy="15" r="7" fill="#FAF3E1"/>
+        </svg>
+        <div style="position: absolute; top: 4px; left: 0; right: 0; text-align: center;
+                    font-family: 'DM Sans', sans-serif; font-size: ${label.length > 2 ? 7 : 9}px;
+                    font-weight: 700; color: ${color}; line-height: 13px;">${label}</div>
+      </div>`,
+    iconSize: [24, 30],
+    iconAnchor: [12, 30],
+    popupAnchor: [0, -27],
+  });
+
+  const marker = L.marker(s.coords, { icon, zIndexOffset: active ? 1000 : 0 }).addTo(map);
+  const period = formatDateRange(s.startDate, s.endDate) || s.periodLabel || '';
+  marker.bindPopup(
+    `<strong>${escapeHtml(s.name)}</strong>` +
+    (period ? `<br><span style="color:#5A6B8C">${escapeHtml(period)}</span>` : '') +
+    (s.score != null ? `<br>Cijfer: ${String(s.score).replace('.', ',')}` : '')
+  );
+  marker.on('click', () => onSelect(s.id));
+  return marker;
+}
+
+// ── Samengevoegde markers ───────────────────────────────────────────
+// Bolletje met het aantal erin, in de kleur van het gemiddelde cijfer.
+// Klikken zoomt in op het gebied; liggen de verblijven op precies dezelfde
+// plek, dan helpt zoomen niet en toont hij een keuzelijst.
+function groepMarker(L, map, groep, onSelect) {
+  const scores = groep.filter(s => s.score != null).map(s => s.score);
+  const gemiddelde = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+  const color = scoreColor(gemiddelde);
+  const maat = groep.length > 9 ? 38 : groep.length > 4 ? 34 : 30;
+
+  const icon = L.divIcon({
+    className: '',
+    html: `
+      <div style="width: ${maat}px; height: ${maat}px; border-radius: 50%;
+                  background: ${color}; border: 2px solid #FAF3E1;
+                  box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+                  display: flex; align-items: center; justify-content: center;
+                  font-family: 'DM Sans', sans-serif; font-weight: 700;
+                  font-size: ${maat > 34 ? 14 : 13}px; color: #FAF3E1;">${groep.length}</div>`,
+    iconSize: [maat, maat],
+    iconAnchor: [maat / 2, maat / 2],
+  });
+
+  const marker = L.marker(groep[0].coords, { icon }).addTo(map);
+
+  marker.on('click', () => {
+    const bounds = L.latLngBounds(groep.map(s => s.coords));
+    const zelfdePlek = bounds.getNorthEast().equals(bounds.getSouthWest());
+
+    // Zit je al zo diep dat verder zoomen ze niet uit elkaar trekt, of staan
+    // ze op precies dezelfde plek? Dan een lijstje om uit te kiezen.
+    if (zelfdePlek || map.getZoom() >= MAX_CLUSTER_ZOOM) {
+      const rijen = groep.map(s => {
+        const period = formatDateRange(s.startDate, s.endDate) || s.periodLabel || '';
+        const cijfer = s.score != null ? String(s.score).replace('.', ',') : '–';
+        return `<button data-stay-id="${escapeHtml(s.id)}" style="
+            display: flex; align-items: center; gap: 8px; width: 100%;
+            padding: 7px 6px; margin: 0; cursor: pointer; text-align: left;
+            background: transparent; border: none;
+            border-bottom: 1px solid rgba(31,41,34,0.10);
+            font-family: 'DM Sans', sans-serif; font-size: 13px;">
+            <span style="flex-shrink: 0; width: 22px; height: 22px; border-radius: 6px;
+                         background: ${scoreColor(s.score)}; color: #FAF3E1;
+                         display: flex; align-items: center; justify-content: center;
+                         font-weight: 700; font-size: 11px;">${cijfer}</span>
+            <span>
+              <span style="font-weight: 600; color: #2D4F3E;">${escapeHtml(s.name)}</span>
+              ${period ? `<br><span style="color:#5A6B8C; font-size: 11px;">${escapeHtml(period)}</span>` : ''}
+            </span>
+          </button>`;
+      }).join('');
+
+      const popup = L.popup({ minWidth: 210, maxHeight: 260 })
+        .setLatLng(groep[0].coords)
+        .setContent(
+          `<div style="font-family:'DM Sans',sans-serif;">
+             <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px;
+                         color:#5A6B8C; font-weight:600; margin-bottom:4px;">
+               ${groep.length} verblijven op deze plek
+             </div>${rijen}</div>`
+        )
+        .openOn(map);
+
+      // Knoppen aanhangen zodra de popup in de DOM staat
+      setTimeout(() => {
+        popup.getElement()?.querySelectorAll('[data-stay-id]').forEach((knop) => {
+          knop.addEventListener('click', () => {
+            onSelect(knop.getAttribute('data-stay-id'));
+            map.closePopup();
+          });
+        });
+      }, 0);
+      return;
+    }
+
+    map.fitBounds(bounds, { padding: [60, 60], maxZoom: MAX_CLUSTER_ZOOM });
+  });
+
+  return marker;
+}
+
 const StayMap = ({ stays, selectedId, onSelect }) => {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const leafletRef = useRef(null);
   const markersRef = useRef([]);
   const ptsRef = useRef([]);
+  const drawRef = useRef(null);
+  const fitKeyRef = useRef('');
   const [ready, setReady] = useState(false);
   const [full, setFull] = useState(false);
 
@@ -111,64 +243,71 @@ const StayMap = ({ stays, selectedId, onSelect }) => {
     };
   }, []);
 
-  // Markers opnieuw tekenen bij elke wijziging in de lijst of selectie
+  // Markers tekenen. Verblijven die op het huidige zoomniveau binnen
+  // CLUSTER_PX van elkaar vallen worden samengevoegd tot één bolletje met het
+  // aantal erin; klikken zoomt in op dat groepje. Wordt opnieuw uitgevoerd bij
+  // elke zoomwijziging, want wat samenvalt hangt van het zoomniveau af.
   useEffect(() => {
     const map = mapRef.current;
     const L = leafletRef.current;
     if (!map || !L || !ready) return;
 
-    markersRef.current.forEach(m => m.remove());
-    markersRef.current = [];
-
     const withCoords = stays.filter(s => Array.isArray(s.coords));
-    const pts = [];
 
-    withCoords.forEach((s) => {
-      const color = scoreColor(s.score);
-      const active = s.id === selectedId;
-      const label = s.score != null ? String(s.score).replace('.', ',') : '·';
-      // Compacte speld met het cijfer erin. Bewust kleiner dan die op /kaart:
-      // daar staat één dag per keer, hier staan alle verblijven van alle
-      // vakanties tegelijk en lopen ze anders over elkaar heen. Het gekozen
-      // verblijf wordt groter getekend en komt bovenop te liggen.
-      const icon = L.divIcon({
-        className: '',
-        html: `
-          <div style="position: relative; width: 24px; height: 30px;
-                      filter: drop-shadow(0 1px 2px rgba(0,0,0,${active ? 0.45 : 0.3}));
-                      transform: scale(${active ? 1.35 : 1}); transform-origin: bottom center;">
-            <svg viewBox="0 0 32 40" width="24" height="30" xmlns="http://www.w3.org/2000/svg">
-              <path d="M16 0 C7 0 0 7 0 16 C0 25 16 40 16 40 C16 40 32 25 32 16 C32 7 25 0 16 0 Z"
-                    fill="${color}" stroke="${active ? COLORS.charcoal : '#FAF3E1'}" stroke-width="2"/>
-              <circle cx="16" cy="15" r="7" fill="#FAF3E1"/>
-            </svg>
-            <div style="position: absolute; top: 4px; left: 0; right: 0; text-align: center;
-                        font-family: 'DM Sans', sans-serif; font-size: ${label.length > 2 ? 7 : 9}px;
-                        font-weight: 700; color: ${color}; line-height: 13px;">${label}</div>
-          </div>`,
-        iconSize: [24, 30],
-        iconAnchor: [12, 30],
-        popupAnchor: [0, -27],
+    const draw = () => {
+      markersRef.current.forEach(m => m.remove());
+      markersRef.current = [];
+
+      // Posities in schermpixels; alleen zo weet je wat visueel overlapt.
+      const punten = withCoords.map(s => ({ s, p: map.latLngToContainerPoint(s.coords) }));
+
+      // Simpele greedy-groepering: loop de punten langs en trek alles wat
+      // binnen CLUSTER_PX ligt in dezelfde groep. Voor een gezinslogboek
+      // (tientallen verblijven) ruim snel genoeg.
+      const gebruikt = new Set();
+      const groepen = [];
+      punten.forEach((a, i) => {
+        if (gebruikt.has(i)) return;
+        gebruikt.add(i);
+        const groep = [a];
+        punten.forEach((b, j) => {
+          if (gebruikt.has(j)) return;
+          if (a.p.distanceTo(b.p) <= CLUSTER_PX) { gebruikt.add(j); groep.push(b); }
+        });
+        groepen.push(groep);
       });
 
-      const marker = L.marker(s.coords, {
-        icon,
-        zIndexOffset: active ? 1000 : 0,
-      }).addTo(map);
-      const period = formatDateRange(s.startDate, s.endDate) || s.periodLabel || '';
-      marker.bindPopup(
-        `<strong>${escapeHtml(s.name)}</strong>` +
-        (period ? `<br><span style="color:#5A6B8C">${escapeHtml(period)}</span>` : '') +
-        (s.score != null ? `<br>Cijfer: ${String(s.score).replace('.', ',')}` : '')
-      );
-      marker.on('click', () => onSelect(s.id));
-      markersRef.current.push(marker);
-      pts.push(s.coords);
-    });
+      groepen.forEach((groep) => {
+        if (groep.length === 1) {
+          markersRef.current.push(losseMarker(L, map, groep[0].s, selectedId, onSelect));
+        } else {
+          markersRef.current.push(groepMarker(L, map, groep.map(g => g.s), onSelect));
+        }
+      });
+    };
 
-    ptsRef.current = pts;
-    fit(map, L, pts);
+    drawRef.current = draw;
+    draw();
+
+    // Alleen opnieuw passend maken als de vérzameling punten wijzigt — niet
+    // bij het aanklikken van een verblijf, anders verlies je je eigen zoom
+    // zodra je een marker aantikt.
+    const key = withCoords.map(s => `${s.coords[0]},${s.coords[1]}`).sort().join('|');
+    ptsRef.current = withCoords.map(s => s.coords);
+    if (key !== fitKeyRef.current) {
+      fitKeyRef.current = key;
+      fit(map, L, ptsRef.current);
+    }
   }, [stays, selectedId, ready, onSelect]);
+
+  // Bij in- of uitzoomen valt de groepering anders uit
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const opnieuw = () => drawRef.current?.();
+    map.on('zoomend', opnieuw);
+    return () => { map.off('zoomend', opnieuw); };
+  }, [ready]);
 
   return (
     <div style={full ? {
