@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { upload } from '@vercel/blob/client';
 import {
   ArrowLeft, Plus, Trash2, Star, MapPin, Camera, Loader2, X, ChevronDown,
-  SlidersHorizontal, RefreshCw, Maximize2, Minimize2,
+  SlidersHorizontal, RefreshCw, Maximize2, Minimize2, Calendar as CalendarIcon,
 } from 'lucide-react';
 import { COLORS, formatDateRange } from '@/lib/data';
 import { getPin } from '@/lib/maps';
@@ -922,18 +922,12 @@ const StayForm = ({ onSave, onCancel }) => {
         other={typeOther} onOther={setTypeOther}
       />
 
-      <div style={S.dateRow}>
-        <div style={{ flex: 1 }}>
-          <label style={S.label}>Van</label>
-          <input type="date" style={S.input} value={startDate}
-                 onChange={(e) => setStartDate(e.target.value)} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <label style={S.label}>Tot</label>
-          <input type="date" style={S.input} value={endDate}
-                 onChange={(e) => setEndDate(e.target.value)} />
-        </div>
-      </div>
+      <label style={S.label}>Wanneer</label>
+      <DateRangePicker
+        startDate={startDate || null}
+        endDate={endDate || null}
+        onChange={({ startDate: s, endDate: e }) => { setStartDate(s || ''); setEndDate(e || ''); }}
+      />
 
       <label style={S.label}>Of los uit het hoofd</label>
       <input
@@ -964,6 +958,136 @@ const StayForm = ({ onSave, onCancel }) => {
       <div style={S.formHint}>
         Foto's voeg je toe zodra het verblijf is opgeslagen.
       </div>
+    </div>
+  );
+};
+
+// ── Datumbereik in één kalender ─────────────────────────────────────
+// Eerste tik zet de begindatum, tweede de einddatum. Tik je een datum vóór de
+// begindatum, dan begint hij daar opnieuw — dat is wat mensen verwachten en
+// scheelt een "wissen"-tik. Werkt met 'YYYY-MM-DD'-sleutels en niet met Date-
+// objecten, zodat er geen tijdzone tussen kan komen.
+
+const MAANDEN = ['januari', 'februari', 'maart', 'april', 'mei', 'juni',
+  'juli', 'augustus', 'september', 'oktober', 'november', 'december'];
+const WEEKDAGEN = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'];
+
+const toKey = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const parseKey = (k) => {
+  const [y, m, d] = k.split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
+
+const DateRangePicker = ({ startDate, endDate, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const [maand, setMaand] = useState(() => {
+    const basis = startDate ? parseKey(startDate) : new Date();
+    return new Date(basis.getFullYear(), basis.getMonth(), 1);
+  });
+
+  const samenvatting = formatDateRange(startDate, endDate);
+
+  const kies = (key) => {
+    // Geen begindatum, of allebei al gezet → opnieuw beginnen
+    if (!startDate || (startDate && endDate)) {
+      onChange({ startDate: key, endDate: null });
+      return;
+    }
+    if (key < startDate) {
+      onChange({ startDate: key, endDate: null });
+      return;
+    }
+    onChange({ startDate, endDate: key });
+    setOpen(false);
+  };
+
+  // Rooster opbouwen: lege cellen tot de eerste dag, dan de dagen zelf.
+  const jaar = maand.getFullYear();
+  const mnd = maand.getMonth();
+  const eersteDag = new Date(jaar, mnd, 1);
+  const offset = (eersteDag.getDay() + 6) % 7; // maandag = 0
+  const aantalDagen = new Date(jaar, mnd + 1, 0).getDate();
+  const cellen = [
+    ...Array(offset).fill(null),
+    ...Array.from({ length: aantalDagen }, (_, i) => toKey(new Date(jaar, mnd, i + 1))),
+  ];
+
+  const vandaag = toKey(new Date());
+
+  return (
+    <div>
+      <button type="button" onClick={() => setOpen(o => !o)} style={S.dateSummary}>
+        <CalendarIcon size={15} style={{ color: COLORS.lake, flexShrink: 0 }} />
+        <span style={{ flex: 1, textAlign: 'left' }}>
+          {samenvatting || 'Kies de periode'}
+          {startDate && !endDate && (
+            <span style={{ color: COLORS.sunset, fontWeight: 600 }}> · kies de einddatum</span>
+          )}
+        </span>
+        <ChevronDown
+          size={16}
+          style={{ color: COLORS.inkLight, transform: open ? 'rotate(180deg)' : 'none' }}
+        />
+      </button>
+
+      {open && (
+        <div style={S.kalender}>
+          <div style={S.kalenderKop}>
+            <button type="button" onClick={() => setMaand(new Date(jaar, mnd - 1, 1))}
+                    style={S.kalenderPijl} aria-label="Vorige maand">‹</button>
+            <div style={S.kalenderTitel}>{MAANDEN[mnd]} {jaar}</div>
+            <button type="button" onClick={() => setMaand(new Date(jaar, mnd + 1, 1))}
+                    style={S.kalenderPijl} aria-label="Volgende maand">›</button>
+          </div>
+
+          <div style={S.kalenderRaster}>
+            {WEEKDAGEN.map(d => (
+              <div key={d} style={S.kalenderWeekdag}>{d}</div>
+            ))}
+            {cellen.map((key, i) => {
+              if (!key) return <div key={`leeg-${i}`} />;
+              const isStart = key === startDate;
+              const isEind = key === endDate;
+              const isTussen = startDate && endDate && key > startDate && key < endDate;
+              const uiteinde = isStart || isEind;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => kies(key)}
+                  style={{
+                    ...S.kalenderDag,
+                    background: uiteinde ? COLORS.forest : isTussen ? 'rgba(45,79,62,0.13)' : 'transparent',
+                    color: uiteinde ? COLORS.cream : COLORS.charcoal,
+                    fontWeight: uiteinde || isTussen ? 700 : 400,
+                    boxShadow: key === vandaag && !uiteinde ? `inset 0 0 0 1px ${COLORS.lake}` : 'none',
+                    borderRadius: isStart && isEind ? 9
+                      : isStart ? '9px 0 0 9px'
+                      : isEind ? '0 9px 9px 0'
+                      : isTussen ? 0 : 9,
+                  }}
+                >{Number(key.slice(8))}</button>
+              );
+            })}
+          </div>
+
+          <div style={S.kalenderVoet}>
+            <span style={{ color: COLORS.inkLight }}>
+              {!startDate ? 'Tik de eerste dag aan'
+                : !endDate ? 'Tik nu de laatste dag aan'
+                : 'Tik een nieuwe dag aan om opnieuw te kiezen'}
+            </span>
+            {(startDate || endDate) && (
+              <button
+                type="button"
+                onClick={() => { onChange({ startDate: null, endDate: null }); }}
+                style={S.linkBtn}
+              >Wissen</button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1197,18 +1321,12 @@ const StayCard = ({
             onOther={(v) => onUpdate({ typeOther: v || null })}
           />
 
-          <div style={S.dateRow}>
-            <div style={{ flex: 1 }}>
-              <label style={S.label}>Van</label>
-              <input type="date" style={S.input} value={stay.startDate || ''}
-                     onChange={(e) => onUpdate({ startDate: e.target.value || null })} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label style={S.label}>Tot</label>
-              <input type="date" style={S.input} value={stay.endDate || ''}
-                     onChange={(e) => onUpdate({ endDate: e.target.value || null })} />
-            </div>
-          </div>
+          <label style={S.label}>Wanneer</label>
+          <DateRangePicker
+            startDate={stay.startDate || null}
+            endDate={stay.endDate || null}
+            onChange={({ startDate, endDate }) => onUpdate({ startDate, endDate })}
+          />
 
           <label style={S.label}>Of los uit het hoofd</label>
           <input
@@ -1439,6 +1557,45 @@ const S = {
     color: COLORS.charcoal, outline: 'none', boxSizing: 'border-box',
   },
   dateRow: { display: 'flex', gap: 10 },
+  dateSummary: {
+    width: '100%', display: 'flex', alignItems: 'center', gap: 9,
+    padding: '11px 13px', background: COLORS.cream,
+    border: `1px solid ${COLORS.hairline}`, borderRadius: 10, cursor: 'pointer',
+    fontFamily: "'DM Sans', sans-serif", fontSize: 14, color: COLORS.charcoal,
+    boxSizing: 'border-box',
+  },
+  kalender: {
+    marginTop: 8, padding: 10, borderRadius: 12,
+    background: COLORS.cream, border: `1px solid ${COLORS.hairline}`,
+  },
+  kalenderKop: {
+    display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8,
+  },
+  kalenderTitel: {
+    flex: 1, textAlign: 'center', fontFamily: "'Fraunces', serif",
+    fontSize: 16, color: COLORS.forest,
+  },
+  kalenderPijl: {
+    width: 32, height: 32, borderRadius: 9, cursor: 'pointer',
+    border: `1px solid ${COLORS.hairline}`, background: 'transparent',
+    color: COLORS.forest, fontSize: 18, lineHeight: 1,
+    fontFamily: "'DM Sans', sans-serif",
+  },
+  kalenderRaster: {
+    display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px 0',
+  },
+  kalenderWeekdag: {
+    textAlign: 'center', fontSize: 10, fontWeight: 600,
+    color: COLORS.inkLight, textTransform: 'uppercase', paddingBottom: 4,
+  },
+  kalenderDag: {
+    height: 38, border: 'none', cursor: 'pointer', padding: 0,
+    fontFamily: "'DM Sans', sans-serif", fontSize: 14,
+  },
+  kalenderVoet: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    marginTop: 8, fontSize: 11,
+  },
   scoreRow: { display: 'flex', gap: 4, flexWrap: 'wrap' },
   scoreBtn: {
     width: 32, height: 34, borderRadius: 8, cursor: 'pointer',

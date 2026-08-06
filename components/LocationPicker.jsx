@@ -5,7 +5,7 @@ import { X, MapPin, Search, Loader2 } from 'lucide-react';
 import { COLORS } from '@/lib/data';
 import {
   COORDS_RE, isGoogleMapsUrl, isShortMapsUrl, parseMapsUrlClient,
-  apiGeocode, apiResolveMaps,
+  apiGeocode, apiResolveMaps, extractUrl, labelBeforeUrl,
 } from '@/lib/maps';
 
 // Locatieveld met vier manieren van invoeren:
@@ -67,21 +67,25 @@ const LocationPicker = ({ value, onChange, accentColor = COLORS.forest, placehol
       return;
     }
 
-    // 2. Google Maps-link geplakt
-    if (isGoogleMapsUrl(txt)) {
+    // 2. Google Maps-link geplakt. De app plakt de naam mee vóór de link,
+    //    dus we vissen de URL uit de tekst in plaats van te eisen dat het
+    //    hele veld één kale URL is.
+    const link = extractUrl(txt);
+    if (link && isGoogleMapsUrl(link)) {
       setShowResults(false);
       setResults([]);
-      const direct = parseMapsUrlClient(txt);
+      const naamHint = labelBeforeUrl(txt);
+      const direct = parseMapsUrlClient(link);
       if (direct.coords) {
-        applyParsed(direct);
+        applyParsed({ ...direct, name: direct.name || naamHint });
         return;
       }
-      if (isShortMapsUrl(txt)) {
+      if (isShortMapsUrl(link)) {
         // Korte link → server lost de redirect op
         setLoading(true);
         try {
-          const data = await apiResolveMaps(txt.trim());
-          applyParsed(data);
+          const data = await apiResolveMaps(link);
+          applyParsed({ ...data, name: data.name || naamHint });
         } catch {
           setLoading(false);
           setQuery('');
@@ -138,6 +142,16 @@ const LocationPicker = ({ value, onChange, accentColor = COLORS.forest, placehol
           type="text"
           value={query}
           onChange={(e) => onChangeText(e.target.value)}
+          onPaste={(e) => {
+            // Een invoerveld van één regel plakt regeleindes weg, terwijl de
+            // Maps-app juist "naam \n adres \n link" meestuurt. Lees daarom de
+            // ruwe kleminhoud, dan blijft de naam los van het adres.
+            const ruw = e.clipboardData?.getData('text');
+            if (ruw && ruw.includes('\n') && extractUrl(ruw)) {
+              e.preventDefault();
+              onChangeText(ruw);
+            }
+          }}
           onFocus={() => setShowResults(true)}
           placeholder={placeholder || "Bv. 'Camping de la Plage' of 'Annecy'"}
           style={inputStyle}

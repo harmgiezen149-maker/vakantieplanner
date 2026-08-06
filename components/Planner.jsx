@@ -17,7 +17,7 @@ import { useRoute } from '@/lib/useRoute';
 import LocationPicker from '@/components/LocationPicker';
 import {
   getPin, setPin, apiResolveMaps,
-  isGoogleMapsUrl, parseMapsUrlClient,
+  isGoogleMapsUrl, parseMapsUrlClient, extractUrl, labelBeforeUrl,
 } from '@/lib/maps';
 import { archiveTripStays } from '@/lib/stayLog';
 
@@ -1736,18 +1736,22 @@ const PasteLinkSheet = ({ onCreate, onClose }) => {
     setState('loading');
     setErrMsg('');
     try {
+      // De Maps-app plakt de naam van de plek vóór de link, dus we vissen de
+      // URL uit de tekst in plaats van een kale URL te eisen.
+      const link = extractUrl(v) || v;
+      const naamHint = labelBeforeUrl(v);
       let data = null;
-      const direct = parseMapsUrlClient(v);
+      const direct = parseMapsUrlClient(link);
       if (direct.coords) {
         data = { name: direct.name, coords: direct.coords, description: null };
-      } else if (isGoogleMapsUrl(v)) {
-        data = await apiResolveMaps(v);
+      } else if (isGoogleMapsUrl(link)) {
+        data = await apiResolveMaps(link);
       } else {
         throw new Error('geen Maps-link');
       }
       if (!data?.coords) throw new Error('geen locatie gevonden');
       setPreview({
-        name: data.name || 'Nieuwe activiteit',
+        name: data.name || naamHint || 'Nieuwe activiteit',
         coords: data.coords,
         description: data.description || null,
       });

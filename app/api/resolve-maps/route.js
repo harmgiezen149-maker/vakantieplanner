@@ -104,7 +104,33 @@ export async function POST(request) {
     return Response.json({ error: 'resolve_failed' }, { status: 502 });
   }
 
-  const { name, coords } = parseMapsUrl(finalUrl);
+  let { name, coords } = parseMapsUrl(finalUrl);
+
+  // Vangnet: sommige deel-links uit de Maps-app komen uit op een URL met wél
+  // een plaatsnaam maar zonder coördinaten. Zoek die naam dan op — beter een
+  // locatie bij benadering dan een foutmelding.
+  if (!coords && name) {
+    try {
+      const zoek = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name)}&format=json&limit=1`,
+        {
+          headers: {
+            'User-Agent': 'VakantiePlanner/1.0 (familie-vakantieplanner)',
+            'Accept-Language': 'nl,en,fr,de',
+          },
+          signal: AbortSignal.timeout(8_000),
+        },
+      );
+      if (zoek.ok) {
+        const treffers = await zoek.json();
+        const t = treffers?.[0];
+        if (t) coords = [parseFloat(t.lat), parseFloat(t.lon)];
+      }
+    } catch {
+      // vangnet mag falen
+    }
+  }
+
   if (!coords) {
     return Response.json({ error: 'no_coords_found', finalUrl }, { status: 422 });
   }

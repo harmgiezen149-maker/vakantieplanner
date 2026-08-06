@@ -213,7 +213,16 @@ En `onUploadCompleted` vuurt **niet lokaal** (Blob moet die callback publiek kun
 bereiken), dus hang er geen opslag aan — de client schrijft de teruggekregen URL zelf weg.
 Foto's worden vóór het uploaden in de browser verkleind tot max 1600 px.
 
-**13. Het land is afgeleid, niet ingetypt.**
+**13. Een geplakte Maps-link is zelden een kale URL.**
+De deelknop van de Google Maps-**app** zet er de naam en vaak het adres vóór
+("Camping X\nRoute…\nhttps://maps.app.goo.gl/…"); uit de adresbalk van de browser komt
+wél een kale URL. Test dus nooit met `new URL(hele veld)` — gebruik `extractUrl()` uit
+`lib/maps.js`, dat de eerste link uit de tekst vist, en `labelBeforeUrl()` voor de naam
+ervoor. `LocationPicker` leest bij plakken bovendien de ruwe kleminhoud via `onPaste`,
+omdat een invoerveld van één regel de regeleindes wegpoetst en naam en adres anders aan
+elkaar plakken.
+
+**14. Het land is afgeleid, niet ingetypt.**
 `STAY_TYPES` en de landhulpjes staan in `lib/stayTypes.js` — een module **zonder**
 `'use client'`, want `app/api/verblijven/route.js` valideert `type` tegen diezelfde lijst.
 Zet er dus geen fetch of localStorage in; dat hoort in `lib/stayLog.js`. Het land komt uit
@@ -222,7 +231,7 @@ twee bronnen: het `address`-object dat `/api/geocode` bij een zoekresultaat al m
 verzoek per seconde toe**, dus het bijwerken van bestaande verblijven gaat sequentieel met
 ~1,1 s ertussen — nooit `Promise.all`.
 
-**14. Bewust géén service worker.**
+**15. Bewust géén service worker.**
 De PWA is manifest + iconen, meer niet. Voeg er geen offline-caching aan toe zonder dat
 expliciet te bespreken: gecachete JS naast een gedeeld Redis-document geeft precies de
 "waarom zie ik oude data"-klasse bugs die punt 4 probeert te vermijden.
