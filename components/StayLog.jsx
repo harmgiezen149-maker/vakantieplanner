@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { upload } from '@vercel/blob/client';
 import {
   ArrowLeft, Plus, Trash2, Star, MapPin, Camera, Loader2, X, ChevronDown,
-  SlidersHorizontal, RefreshCw,
+  SlidersHorizontal, RefreshCw, Maximize2, Minimize2,
 } from 'lucide-react';
 import { COLORS, formatDateRange } from '@/lib/data';
 import { getPin } from '@/lib/maps';
@@ -35,12 +35,42 @@ const scoreColor = (score) => {
 // Zelfde patroon als DayOverview: Leaflet browser-only via dynamic import,
 // CSS als <link data-leaflet>, kaart opruimen in de cleanup.
 
+// Kaart passend maken op alle markers. maxZoom 13 (niet 11) zodat verblijven
+// die dicht bij elkaar liggen ver genoeg uit elkaar getrokken worden om ze nog
+// los te kunnen aanklikken.
+function fit(map, L, pts) {
+  if (pts.length === 1) map.setView(pts[0], 11);
+  else if (pts.length > 1) map.fitBounds(L.latLngBounds(pts), { padding: [36, 36], maxZoom: 13 });
+}
+
 const StayMap = ({ stays, selectedId, onSelect }) => {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const leafletRef = useRef(null);
   const markersRef = useRef([]);
+  const ptsRef = useRef([]);
   const [ready, setReady] = useState(false);
+  const [full, setFull] = useState(false);
+
+  // Bij het wisselen van formaat moet Leaflet opnieuw meten, en daarna
+  // opnieuw passend maken — het venster heeft een andere verhouding.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const map = mapRef.current;
+      const L = leafletRef.current;
+      if (!map) return;
+      map.invalidateSize();
+      if (L) fit(map, L, ptsRef.current);
+    }, 80);
+    return () => clearTimeout(t);
+  }, [full]);
+
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e) => { if (e.key === 'Escape') setFull(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [full]);
 
   useEffect(() => {
     let mounted = true;
@@ -97,28 +127,34 @@ const StayMap = ({ stays, selectedId, onSelect }) => {
       const color = scoreColor(s.score);
       const active = s.id === selectedId;
       const label = s.score != null ? String(s.score).replace('.', ',') : '·';
-      // Speld met het cijfer erin — zelfde vorm als de markers op /kaart
+      // Compacte speld met het cijfer erin. Bewust kleiner dan die op /kaart:
+      // daar staat één dag per keer, hier staan alle verblijven van alle
+      // vakanties tegelijk en lopen ze anders over elkaar heen. Het gekozen
+      // verblijf wordt groter getekend en komt bovenop te liggen.
       const icon = L.divIcon({
         className: '',
         html: `
-          <div style="position: relative; width: 32px; height: 40px;
-                      filter: drop-shadow(0 2px 3px rgba(0,0,0,${active ? 0.45 : 0.3}));
-                      transform: scale(${active ? 1.2 : 1}); transform-origin: bottom center;">
-            <svg viewBox="0 0 32 40" width="32" height="40" xmlns="http://www.w3.org/2000/svg">
+          <div style="position: relative; width: 24px; height: 30px;
+                      filter: drop-shadow(0 1px 2px rgba(0,0,0,${active ? 0.45 : 0.3}));
+                      transform: scale(${active ? 1.35 : 1}); transform-origin: bottom center;">
+            <svg viewBox="0 0 32 40" width="24" height="30" xmlns="http://www.w3.org/2000/svg">
               <path d="M16 0 C7 0 0 7 0 16 C0 25 16 40 16 40 C16 40 32 25 32 16 C32 7 25 0 16 0 Z"
                     fill="${color}" stroke="${active ? COLORS.charcoal : '#FAF3E1'}" stroke-width="2"/>
               <circle cx="16" cy="15" r="7" fill="#FAF3E1"/>
             </svg>
-            <div style="position: absolute; top: 7px; left: 0; right: 0; text-align: center;
-                        font-family: 'DM Sans', sans-serif; font-size: ${label.length > 2 ? 9 : 11}px;
-                        font-weight: 700; color: ${color}; line-height: 16px;">${label}</div>
+            <div style="position: absolute; top: 4px; left: 0; right: 0; text-align: center;
+                        font-family: 'DM Sans', sans-serif; font-size: ${label.length > 2 ? 7 : 9}px;
+                        font-weight: 700; color: ${color}; line-height: 13px;">${label}</div>
           </div>`,
-        iconSize: [32, 40],
-        iconAnchor: [16, 40],
-        popupAnchor: [0, -36],
+        iconSize: [24, 30],
+        iconAnchor: [12, 30],
+        popupAnchor: [0, -27],
       });
 
-      const marker = L.marker(s.coords, { icon }).addTo(map);
+      const marker = L.marker(s.coords, {
+        icon,
+        zIndexOffset: active ? 1000 : 0,
+      }).addTo(map);
       const period = formatDateRange(s.startDate, s.endDate) || s.periodLabel || '';
       marker.bindPopup(
         `<strong>${escapeHtml(s.name)}</strong>` +
@@ -130,19 +166,36 @@ const StayMap = ({ stays, selectedId, onSelect }) => {
       pts.push(s.coords);
     });
 
-    if (pts.length === 1) {
-      map.setView(pts[0], 9);
-    } else if (pts.length > 1) {
-      map.fitBounds(L.latLngBounds(pts), { padding: [40, 40], maxZoom: 11 });
-    }
+    ptsRef.current = pts;
+    fit(map, L, pts);
   }, [stays, selectedId, ready, onSelect]);
 
   return (
-    <div style={{
-      height: 300, borderRadius: 14, overflow: 'hidden',
-      border: `1px solid ${COLORS.hairline}`, background: COLORS.creamSoft,
-    }}>
-      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+    <div style={full ? {
+      position: 'fixed', inset: 0, zIndex: 70, background: COLORS.cream,
+      padding: 10, display: 'flex', flexDirection: 'column',
+    } : { position: 'relative', marginBottom: 4 }}>
+      <div
+        ref={containerRef}
+        style={{
+          width: '100%', height: full ? '100%' : 300, flex: full ? 1 : undefined,
+          borderRadius: full ? 12 : 14, overflow: 'hidden',
+          border: `1px solid ${COLORS.hairline}`, background: COLORS.creamSoft,
+          zIndex: 0, position: 'relative',
+        }}
+      />
+      <button
+        onClick={() => setFull(f => !f)}
+        title={full ? 'Verkleinen' : 'Volledig scherm'}
+        aria-label={full ? 'Verkleinen' : 'Volledig scherm'}
+        style={{
+          position: 'absolute', top: full ? 16 : 10, right: full ? 16 : 10, zIndex: 1001,
+          width: 36, height: 36, borderRadius: 10, border: `1px solid ${COLORS.hairline}`,
+          background: COLORS.cream, color: COLORS.forest,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', boxShadow: '0 2px 8px rgba(31,41,34,0.2)',
+        }}
+      >{full ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
     </div>
   );
 };
