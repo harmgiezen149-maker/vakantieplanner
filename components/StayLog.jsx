@@ -972,6 +972,13 @@ const MAANDEN = ['januari', 'februari', 'maart', 'april', 'mei', 'juni',
   'juli', 'augustus', 'september', 'oktober', 'november', 'december'];
 const WEEKDAGEN = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'];
 
+// Nieuwste jaar bovenaan: je voert vaker een recente vakantie in dan die van
+// 1960. Tot 1960 terug is ruim genoeg voor een familielogboek.
+const JAREN = (() => {
+  const nu = new Date().getFullYear();
+  return Array.from({ length: nu + 2 - 1960 + 1 }, (_, i) => nu + 2 - i);
+})();
+
 const toKey = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const parseKey = (k) => {
@@ -985,6 +992,14 @@ const DateRangePicker = ({ startDate, endDate, onChange }) => {
     const basis = startDate ? parseKey(startDate) : new Date();
     return new Date(basis.getFullYear(), basis.getMonth(), 1);
   });
+
+  // Bij openen naar de maand van de begindatum springen — anders sta je bij
+  // een oude vakantie alsnog in het huidige jaar te kijken.
+  useEffect(() => {
+    if (!open || !startDate) return;
+    const d = parseKey(startDate);
+    setMaand(new Date(d.getFullYear(), d.getMonth(), 1));
+  }, [open, startDate]);
 
   const samenvatting = formatDateRange(startDate, endDate);
 
@@ -1036,7 +1051,24 @@ const DateRangePicker = ({ startDate, endDate, onChange }) => {
           <div style={S.kalenderKop}>
             <button type="button" onClick={() => setMaand(new Date(jaar, mnd - 1, 1))}
                     style={S.kalenderPijl} aria-label="Vorige maand">‹</button>
-            <div style={S.kalenderTitel}>{MAANDEN[mnd]} {jaar}</div>
+            {/* Keuzelijsten in plaats van alleen pijlen: een vakantie van 2003
+                opzoeken kost anders tweehonderd tikken. */}
+            <select
+              value={mnd}
+              onChange={(e) => setMaand(new Date(jaar, Number(e.target.value), 1))}
+              style={S.kalenderKeuze}
+              aria-label="Maand"
+            >
+              {MAANDEN.map((m, i) => <option key={m} value={i}>{m}</option>)}
+            </select>
+            <select
+              value={jaar}
+              onChange={(e) => setMaand(new Date(Number(e.target.value), mnd, 1))}
+              style={{ ...S.kalenderKeuze, flex: '0 0 auto' }}
+              aria-label="Jaar"
+            >
+              {JAREN.map(j => <option key={j} value={j}>{j}</option>)}
+            </select>
             <button type="button" onClick={() => setMaand(new Date(jaar, mnd + 1, 1))}
                     style={S.kalenderPijl} aria-label="Volgende maand">›</button>
           </div>
@@ -1574,6 +1606,13 @@ const S = {
   kalenderTitel: {
     flex: 1, textAlign: 'center', fontFamily: "'Fraunces', serif",
     fontSize: 16, color: COLORS.forest,
+  },
+  kalenderKeuze: {
+    flex: 1, minWidth: 0, padding: '7px 4px',
+    background: COLORS.creamSoft, border: `1px solid ${COLORS.hairline}`,
+    borderRadius: 9, cursor: 'pointer',
+    fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 600,
+    color: COLORS.forest, textAlign: 'center', outline: 'none',
   },
   kalenderPijl: {
     width: 32, height: 32, borderRadius: 9, cursor: 'pointer',
