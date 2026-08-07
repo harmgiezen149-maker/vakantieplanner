@@ -116,20 +116,47 @@ app/
     verblijven/ GET/POST  verblijvenlogboek
     verblijven/upload/    uploadtoken voor Vercel Blob
     verblijven/foto/      foto verwijderen uit Blob (DELETE)
-components/   Planner.jsx (~4000 r.), MapView.jsx, DayOverview.jsx,
+components/   Planner.jsx (planscherm), MapView.jsx, DayOverview.jsx,
               PackingList.jsx, Checklist.jsx, StayLog.jsx, LocationPicker.jsx,
               ConflictMelding.jsx (botsingsbalk), Foutmelder.jsx
+  planner/    de sheets van het planscherm — zie hieronder
 lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
               (Maps-links + PIN), stayLog.js, stayTypes.js, backup.js, csv.js,
               conflict.js, errorLog.js, packing.js, stayValidation.js,
               redis.js, useRoute.js
 ```
 
-`components/Planner.jsx` is bewust één groot bestand: alle sheets (`PickDaySheet`,
-`SuggestionsSheet`, `PasteLinkSheet`, `WhatsHereSheet`, `TripSettingsSheet`, …) staan
-erin als lokale componenten. Splits het niet zonder reden — de state zit dicht op elkaar.
-`LocationPicker` is wél eruit gehaald, omdat het verblijvenlogboek hetzelfde veld nodig
-heeft; hergebruik op een tweede pagina is de drempel.
+`components/Planner.jsx` was één bestand van 4.100 regels en is opgesplitst: alle sheets
+staan nu in `components/planner/`. De scheidslijn is **props versus state** — elke sheet
+hangt alleen aan zijn props en leest niets uit `Planner`, dus ze konden er los uit. Wat
+in `Planner.jsx` bleef (`Header`, `TabBar`, `ActivityChip`, `DayCard`, `PlanView`,
+`LibraryView`, `SettingsSheet`, en `Planner` zelf) is het planscherm; die delen wél
+state en props-vormen en horen bij elkaar.
+
+```
+components/planner/
+  Sheet.jsx              de bodemsheet + labelStyle/inputBaseStyle (iedereen importeert dit)
+  PickSheets.jsx         PickActivitySheet + PickDaySheet
+  TripSettingsSheet.jsx  titel, periode, verblijven
+  CustomActivityForm.jsx eigen activiteit aanmaken
+  LocationEditSheet.jsx  locatie van een bestaande activiteit
+  ConfirmSheet.jsx       bevestigingsvraag (met optionele derde knop)
+  PasteLinkSheet.jsx     Google Maps-link plakken
+  WhatsHereSheet.jsx     POI's rond een aangeklikt kaartpunt
+  SuggestionsSheet.jsx   "Ontdek de omgeving" + HikingMap + SuggestionsMap (~1.480 r.)
+```
+
+Twee dingen om te weten:
+
+- **`WhatsHereSheet` bestaat twee keer.** De versie hierboven wordt door
+  `SuggestionsSheet` gebruikt; `MapView.jsx` heeft een eigen kopie die de sheet-chrome
+  inline heeft staan in plaats van `Sheet` te gebruiken. Dat is geen slordigheid maar
+  noodzaak: `Sheet` zit op `z-index` 50/51 en zou daar ónder de Leaflet-panes van de
+  kaart vallen, waar de kopie 1000/1001 gebruikt. Voeg je ze samen, dan moet die
+  z-index eerst geregeld zijn.
+- `LocationPicker` staat bewust een niveau hoger (`components/`), want het
+  verblijvenlogboek gebruikt hetzelfde veld; hergebruik op een tweede pagina is de
+  drempel om iets uit `planner/` te halen.
 
 ## Datamodel
 
