@@ -2,7 +2,8 @@
 
 Werkinstructies voor Claude Code in deze repo. De README is de *gebruikers*-handleiding
 (deployen, env vars, Vercel); dit document is de *ontwikkelaars*-kant: hoe het in elkaar
-zit en waar je je aan bezeert.
+zit en waar je je aan bezeert. **`ROADMAP.md`** houdt bij wat er nog komt en in welke
+volgorde — begin daar als de eigenaar vraagt "wat is de volgende stap".
 
 ## Wat dit is
 
@@ -294,9 +295,19 @@ de drie velden aan, houd dan alle drie de paden kloppend (`toggle`, `setPacked`,
 `changeQty`).
 
 **10. Auth is optioneel en zit in een header.**
-Staat `FAMILY_PIN` niet ingesteld, dan is alles open. Staat hij wel, dan verwacht elke
+Staat `FAMILY_PIN` niet ingesteld, dan is alles open — inclusief
+`POST /api/backup/restore`, dat álles overschrijft. Staat hij wel, dan verwacht elke
 route `X-Family-Pin` (de client haalt hem uit `localStorage['planner-pin']`). Nieuwe API
 routes: neem die check over, anders is dat een gat.
+
+**Maar: alleen het beginscherm kan om die PIN vrágen.** `PinGate` staat in
+`components/Planner.jsx` en nergens anders. Elke andere pagina leest hem via `getPin()`
+en gaat ervan uit dat hij er al staat. Gevolg: open je `/reservekopie` of `/fouten` op
+een apparaat dat nooit via `/` binnenkwam — een tweede browser, de geïnstalleerde app
+naast de browser — dan krijg je 401's en geen enkele manier om alsnog in te loggen.
+Bouw je een nieuwe pagina die de PIN nodig heeft, dan erf je dat probleem. De oplossing
+(`PinGate` eruit halen naar iets dat elke pagina kan gebruiken) staat als stap 1 in
+`ROADMAP.md`; los het daar op en niet met een tweede kopie van de gate.
 
 **11. `export const dynamic = 'force-dynamic'` op elke API route.**
 Zonder dat cachet Vercel de GET en krijg je na opslaan een oude versie terug. Ook op
