@@ -1,5 +1,7 @@
 'use client';
 
+import ConflictMelding from '@/components/ConflictMelding';
+
 import { useEffect, useState, useRef, useCallback } from 'react';
 
 // ── De checklist-inhoud ──────────────────────────────────────────────
@@ -71,6 +73,7 @@ export default function Checklist() {
   const [checked, setChecked] = useState({});
   const [updatedBy, setUpdatedBy] = useState(null);
   const [updatedAt, setUpdatedAt] = useState(null);
+  const [conflict, setConflict] = useState(null);
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -79,6 +82,10 @@ export default function Checklist() {
   // de focus-refresh (vuurt o.a. na een confirm-popup) de wijziging
   // overschrijft met oude serverdata.
   const dirty = useRef(false);
+  // updatedAt van het document zoals wij het kennen — de versie waarop onze
+  // wijziging is gebaseerd.
+  const versie = useRef(null);
+  const laatsteChecked = useRef({});
 
   const load = useCallback(async () => {
     if (dirty.current) return;
@@ -86,8 +93,10 @@ export default function Checklist() {
       const res = await fetch('/api/checklist');
       const data = await res.json();
       setChecked(data.checked ?? {});
+      laatsteChecked.current = data.checked ?? {};
       setUpdatedBy(data.updatedBy ?? null);
       setUpdatedAt(data.updatedAt ?? null);
+      versie.current = data.updatedAt ?? null;
     } catch {
       // stil falen; toon gewoon lege staat
     } finally {
@@ -102,8 +111,10 @@ export default function Checklist() {
     return () => window.removeEventListener('focus', onFocus);
   }, [load]);
 
-  const persist = useCallback((nextChecked) => {
+  // negeerVersie = "toch de mijne opslaan" na een botsing.
+  const persist = useCallback((nextChecked, negeerVersie = false) => {
     dirty.current = true;
+    laatsteChecked.current = nextChecked;
     clearTimeout(saveTimer.current);
     setSaving(true);
     saveTimer.current = setTimeout(async () => {
@@ -111,12 +122,22 @@ export default function Checklist() {
         const res = await fetch('/api/checklist', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ checked: nextChecked, updatedBy: name || null }),
+          body: JSON.stringify({
+            checked: nextChecked,
+            updatedBy: name || null,
+            basisVersie: negeerVersie ? undefined : versie.current,
+          }),
         });
         const data = await res.json();
+        if (res.status === 409) {
+          setConflict(data);
+          return;
+        }
         setUpdatedBy(data.updatedBy ?? null);
         setUpdatedAt(data.updatedAt ?? null);
+        versie.current = data.updatedAt ?? null;
         dirty.current = false;
+        setConflict(null);
       } catch {
         // negeer; volgende toggle probeert opnieuw (dirty blijft staan)
       } finally {
@@ -156,6 +177,14 @@ export default function Checklist() {
           Wat moet er geregeld zijn voordat we rijden. Iedereen vinkt af —
           de lijst is gedeeld.
         </p>
+
+        {conflict && (
+          <ConflictMelding
+            door={conflict.door}
+            onLaadHunVersie={() => { dirty.current = false; setConflict(null); load(); }}
+            onForceer={() => { setConflict(null); persist(laatsteChecked.current, true); }}
+          />
+        )}
 
         {doneCount > 0 && (
           <button

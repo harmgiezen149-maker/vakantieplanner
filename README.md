@@ -148,7 +148,10 @@ Open [http://localhost:3000](http://localhost:3000).
   - `GET /api/geocode?lat=…&lng=…` — coördinaten → land (voor het verblijvenlogboek)
   - `POST /api/route` — dagroute via ORS of OSRM
 - Sync: wijzigingen worden 500 ms na de laatste actie naar de server gestuurd. Bij window-focus wordt automatisch opnieuw opgehaald.
-- Conflictresolutie: last-write-wins. Voor een gezin is dat prima.
+- Bewerken jullie tegelijk? Dan verdwijnt er niets stilzwijgend meer. Wie als tweede
+  opslaat krijgt een melding — "Anna heeft intussen iets opgeslagen" — met twee knoppen:
+  *Hun versie laden* (jouw laatste wijziging vervalt) of *Toch de mijne opslaan* (die van
+  hen wordt overschreven). Samenvoegen doet de app niet; je kiest er één.
 
 ## Bestandsstructuur
 

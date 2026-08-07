@@ -1,4 +1,5 @@
 import { Redis } from '@upstash/redis';
+import { isConflict, conflictAntwoord, CONFLICT_STATUS } from '@/lib/conflict';
 
 // Voorkom dat Vercel de GET-respons cachet — anders kun je na opslaan
 // alsnog een oude (lege) versie terugkrijgen bij het verversen.
@@ -30,6 +31,13 @@ export async function GET() {
 export async function POST(request) {
   try {
     const body = await request.json();
+
+    // Botst dit met wat er intussen is opgeslagen? Zie lib/conflict.js
+    const bestaand = await redis.get(KEY);
+    if (isConflict(bestaand?.updatedAt, body?.basisVersie)) {
+      return Response.json(conflictAntwoord(bestaand), { status: CONFLICT_STATUS });
+    }
+
     const payload = {
       checked: body.checked ?? {},
       updatedBy: body.updatedBy ?? null,

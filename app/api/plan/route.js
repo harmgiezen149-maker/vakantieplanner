@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getRedis, PLAN_KEY, LEGACY_PLAN_KEY } from '@/lib/redis';
 import { DEFAULT_TRIP_CONFIG } from '@/lib/data';
+import { isConflict, conflictAntwoord, CONFLICT_STATUS } from '@/lib/conflict';
 
 export const dynamic = 'force-dynamic';
 
@@ -107,6 +108,13 @@ export async function PUT(request) {
 
     const redis = getRedis();
 
+    // Botst dit met wat er intussen is opgeslagen? Zie lib/conflict.js.
+    // Deze lezing wordt hieronder hergebruikt voor de bewaar-tak.
+    const bestaand = normalize(await redis.get(PLAN_KEY));
+    if (isConflict(bestaand?.updatedAt, body?.basisVersie)) {
+      return NextResponse.json(conflictAntwoord(bestaand), { status: CONFLICT_STATUS });
+    }
+
     // Bescherming: velden die een client niet meestuurt worden niet gewist
     // maar behouden uit de opgeslagen staat. Een client die ze wél expliciet
     // (eventueel leeg) meestuurt — zoals bij "Nieuwe vakantie starten" —
@@ -125,7 +133,7 @@ export async function PUT(request) {
       : undefined;
 
     if (body.tripConfig === undefined || suggestExclusions === undefined) {
-      const existing = normalize(await redis.get(PLAN_KEY));
+      const existing = bestaand;
       if (body.tripConfig === undefined && existing?.tripConfig) {
         tripConfig = existing.tripConfig;
       }

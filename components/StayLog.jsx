@@ -10,6 +10,7 @@ import {
 import { COLORS, formatDateRange } from '@/lib/data';
 import { getPin } from '@/lib/maps';
 import LocationPicker from '@/components/LocationPicker';
+import ConflictMelding from '@/components/ConflictMelding';
 import {
   uid, fetchStayLog, saveStayLog, archiveTripStays,
   reverseCountry, countryFromAddress, groepeerReizen,
@@ -421,6 +422,7 @@ export default function StayLog() {
   const [uploadingFor, setUploadingFor] = useState(null);
   // Voortgang van het achteraf bepalen van landen: { done, total } | null
   const [countryProgress, setCountryProgress] = useState(null);
+  const [conflict, setConflict] = useState(null);
 
   // Filters
   const [fCountry, setFCountry] = useState(null); // landcode, '' = onbekend
@@ -431,6 +433,9 @@ export default function StayLog() {
 
   const saveTimer = useRef(null);
   const latest = useRef([]);
+  // updatedAt van het document zoals wij het kennen; hierop controleert de
+  // server of iemand anders er intussen tussendoor is gekomen.
+  const versie = useRef(null);
   // Zolang er lokaal iets niet is opgeslagen mag de focus-refresh niet
   // overschrijven met oudere serverdata (zelfde vangnet als de inpaklijst).
   const dirty = useRef(false);
@@ -444,6 +449,7 @@ export default function StayLog() {
       const data = await fetchStayLog();
       setStays(data.stays || []);
       setUpdatedBy(data.updatedBy ?? null);
+      versie.current = data.updatedAt ?? null;
       latest.current = data.stays || [];
       setError('');
     } catch (e) {
@@ -497,18 +503,30 @@ export default function StayLog() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, stays.length]);
 
-  const persist = useCallback((next) => {
+  // negeerVersie = "toch de mijne opslaan": schrijft zonder te controleren of
+  // er intussen iets nieuwers staat.
+  const persist = useCallback((next, negeerVersie = false) => {
     latest.current = next;
     dirty.current = true;
     clearTimeout(saveTimer.current);
     setSaving(true);
     saveTimer.current = setTimeout(async () => {
       try {
-        const data = await saveStayLog(latest.current, getName());
+        const data = await saveStayLog(
+          latest.current,
+          getName(),
+          negeerVersie ? undefined : versie.current,
+        );
         setUpdatedBy(data.updatedBy ?? null);
+        versie.current = data.updatedAt ?? null;
         dirty.current = false;
-      } catch {
-        // negeer; de volgende wijziging probeert het opnieuw
+        setConflict(null);
+      } catch (e) {
+        if (e?.conflict) {
+          // Niet stilzwijgend overschrijven: de gebruiker kiest zelf
+          setConflict(e.conflict);
+        }
+        // Andere fouten: de volgende wijziging probeert het opnieuw
       } finally {
         setSaving(false);
       }
@@ -827,6 +845,22 @@ export default function StayLog() {
         </p>
 
         {error && <div style={S.error}>{error}</div>}
+
+        {conflict && (
+          <ConflictMelding
+            door={conflict.door}
+            onLaadHunVersie={() => {
+              // Onze wijziging laten vallen en opnieuw ophalen
+              dirty.current = false;
+              setConflict(null);
+              load();
+            }}
+            onForceer={() => {
+              setConflict(null);
+              persist(latest.current, true);
+            }}
+          />
+        )}
 
         {stats.alle > 0 && (
           <div style={S.statsRow}>

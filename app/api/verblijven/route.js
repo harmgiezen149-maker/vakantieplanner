@@ -1,5 +1,6 @@
 import { getRedis } from '@/lib/redis';
 import { sanitizeStay } from '@/lib/stayValidation';
+import { isConflict, conflictAntwoord, CONFLICT_STATUS } from '@/lib/conflict';
 
 // Het verblijvenlogboek: alle plekken waar het gezin heeft gelogeerd, met
 // bezoekdatum, cijfer, review en foto's.
@@ -61,6 +62,14 @@ export async function POST(request) {
 
   try {
     const body = await request.json();
+    const redisVoor = getRedis();
+
+    // Botst dit met wat er intussen is opgeslagen? Zie lib/conflict.js
+    const bestaand = normalize(await redisVoor.get(KEY));
+    if (isConflict(bestaand?.updatedAt, body?.basisVersie)) {
+      return Response.json(conflictAntwoord(bestaand), { status: CONFLICT_STATUS });
+    }
+
     const payload = {
       stays: Array.isArray(body?.stays) ? body.stays.slice(0, 300).map(sanitizeStay) : [],
       updatedBy: typeof body?.updatedBy === 'string' ? body.updatedBy.slice(0, 40) : null,

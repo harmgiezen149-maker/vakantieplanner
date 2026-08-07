@@ -33,7 +33,8 @@ eerst; is het al misgegaan, dan `rm -rf .next` en opnieuw starten.
 De tests draaien op `node --test` (in Node ingebouwd, geen extra afhankelijkheid) en staan
 in `test/`. Ze dekken de rekenkundige kern: `buildDays` en de override-regels in `data.js`,
 de reisgroepering in `stayLog.js`, de inpaklijst-invariant in `packing.js`, het opruimen van
-reservekopieën in `backup.js`, het uitlezen van Maps-links in `maps.js`, de CSV-import en de
+reservekopieën in `backup.js`, het uitlezen van Maps-links in `maps.js`, het samenvoegen van
+meldingen in `errorLog.js`, de versiecontrole in `conflict.js`, de CSV-import en de
 opschoning in `stayValidation.js`.
 
 Twee dingen om te weten als je tests toevoegt:
@@ -116,9 +117,11 @@ app/
     verblijven/upload/    uploadtoken voor Vercel Blob
     verblijven/foto/      foto verwijderen uit Blob (DELETE)
 components/   Planner.jsx (~4000 r.), MapView.jsx, DayOverview.jsx,
-              PackingList.jsx, Checklist.jsx, StayLog.jsx, LocationPicker.jsx
+              PackingList.jsx, Checklist.jsx, StayLog.jsx, LocationPicker.jsx,
+              ConflictMelding.jsx (botsingsbalk), Foutmelder.jsx
 lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
               (Maps-links + PIN), stayLog.js, stayTypes.js, backup.js, csv.js,
+              conflict.js, errorLog.js, packing.js, stayValidation.js,
               redis.js, useRoute.js
 ```
 
@@ -180,13 +183,30 @@ gewijzigd" bedoelt.
 nieuw top-level veld toe aan het document, dan moet je diezelfde bewaar-tak toevoegen**,
 anders wist een save vanaf `/kaart` het veld stilletjes.
 
-**4. Sync is last-write-wins met twee vangnetten.**
+**4. Sync heeft drie vangnetten, en één ervan is zichtbaar.**
 Opslaan is gedebounced (500 ms in `Planner`, vergelijkbaar in `PackingList`), en elke
 pagina herlaadt bij `window.focus`. Twee refs voorkomen dat die twee elkaar slopen:
 `skipNextSave` (na een fetch niet meteen terugschrijven) en `dirty` (focus-refresh
 overslaat zolang lokale wijzigingen nog niet opgeslagen zijn — vuurt o.a. na een
 confirm-popup). Haal ze niet weg; zonder die refs verlies je de laatste bewerking.
-Echte conflictafhandeling bestaat niet: twee mensen tegelijk = de laatste wint.
+
+Het derde vangnet is de **versiecontrole** in `lib/conflict.js`. Elke pagina onthoudt in
+een `versie`-ref de `updatedAt` die ze bij het ophalen terugkreeg en stuurt die mee als
+`basisVersie`. Staat er in Redis intussen iets nieuwers, dan **weigert de route met
+HTTP 409** en stuurt de huidige serverstaat mee; `components/ConflictMelding.jsx` toont
+dan de keuze "Hun versie laden" of "Toch de mijne opslaan". Drie dingen om te weten:
+
+- **409 is geen fout maar een vraag.** Behandel hem niet als netwerkstoring — de
+  gebruiker is de enige die weet welke van de twee wijzigingen de belangrijkste is.
+- **Geen `basisVersie` meesturen = bewust doorschrijven.** Dat is precies wat "toch de
+  mijne opslaan" doet, en het houdt een oude tab die de app nog zonder versies draait
+  werkend. `isConflict()` geeft daarom `false` bij `undefined`/`null`.
+- **Nieuw document = ook deze controle.** Voeg je een vijfde Redis-document met een
+  schrijfroute toe, neem dan de lees-vóór-schrijf-tak over, anders is dat gat terug.
+
+Wat dit *niet* doet: samenvoegen. Vinken twee mensen elk een ander item af, dan blijft
+het kiezen tussen twee volledige versies. Dat vraagt een datamodel per veld en is de
+moeite pas waard als het in de praktijk knelt.
 
 **5. Leaflet is browser-only.**
 Overal hetzelfde patroon: `await import('leaflet')` in een effect, plus de CSS die als

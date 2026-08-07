@@ -1,4 +1,5 @@
 import { Redis } from '@upstash/redis';
+import { isConflict, conflictAntwoord, CONFLICT_STATUS } from '@/lib/conflict';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +30,13 @@ export async function GET() {
 export async function POST(request) {
   try {
     const body = await request.json();
+
+    // Botst dit met wat er intussen is opgeslagen? Zie lib/conflict.js
+    const bestaand = await redis.get(KEY);
+    if (isConflict(bestaand?.updatedAt, body?.basisVersie)) {
+      return Response.json(conflictAntwoord(bestaand), { status: CONFLICT_STATUS });
+    }
+
     const payload = {
       categories: Array.isArray(body.categories) ? body.categories : [],
       items: Array.isArray(body.items) ? body.items : [],

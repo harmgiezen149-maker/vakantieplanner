@@ -21,6 +21,7 @@ import {
   isGoogleMapsUrl, parseMapsUrlClient, extractUrl, labelBeforeUrl,
 } from '@/lib/maps';
 import { archiveTripStays } from '@/lib/stayLog';
+import ConflictMelding from '@/components/ConflictMelding';
 
 // ============ API CLIENT ============
 
@@ -43,15 +44,26 @@ async function apiGet() {
   return res.json();
 }
 
-async function apiPut(plan, customActivities, locationOverrides, tripConfig, suggestExclusions, name) {
+// basisVersie is de updatedAt waarop deze wijziging is gebaseerd; laat hem weg
+// om zonder controle te schrijven ("toch de mijne opslaan" na een botsing).
+async function apiPut(plan, customActivities, locationOverrides, tripConfig, suggestExclusions, name, basisVersie) {
   const res = await fetch('/api/plan', {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
       'X-Family-Pin': getPin(),
     },
-    body: JSON.stringify({ plan, customActivities, locationOverrides, tripConfig, suggestExclusions, updatedBy: name || null }),
+    body: JSON.stringify({
+      plan, customActivities, locationOverrides, tripConfig, suggestExclusions,
+      updatedBy: name || null, basisVersie,
+    }),
   });
+  if (res.status === 409) {
+    const info = await res.json().catch(() => ({}));
+    const err = new Error('conflict');
+    err.conflict = info;
+    throw err;
+  }
   if (!res.ok) throw new Error(res.status === 401 ? 'unauthorized' : `HTTP ${res.status}`);
   return res.json();
 }
@@ -3578,11 +3590,15 @@ export default function Planner({ authRequired }) {
   const [sheet, setSheet] = useState(null);
   const [syncStatus, setSyncStatus] = useState('idle'); // 'idle' | 'syncing' | 'synced' | 'offline'
   const [serverUpdate, setServerUpdate] = useState({ at: null, by: null });
+  const [conflict, setConflict] = useState(null);
   const [name, setName] = useState('');
 
   const saveTimer = useRef(null);
   const skipNextSave = useRef(true);
   const firstLoad = useRef(true);
+  // updatedAt van het document zoals wij het kennen; hierop controleert de
+  // server of iemand anders er intussen tussendoor is gekomen.
+  const versie = useRef(null);
 
   // Init name from localStorage
   useEffect(() => { setName(getName()); }, []);
@@ -3598,6 +3614,7 @@ export default function Planner({ authRequired }) {
     try {
       const data = await apiGet();
       skipNextSave.current = true;
+      versie.current = data.updatedAt ?? null;
       setPlan(data.plan || {});
       setCustomActivities(data.customActivities || []);
       setLocationOverrides(data.locationOverrides || {});
@@ -3645,12 +3662,23 @@ export default function Planner({ authRequired }) {
     setSyncStatus('syncing');
     saveTimer.current = setTimeout(async () => {
       try {
-        const data = await apiPut(plan, customActivities, locationOverrides, tripConfig, suggestExclusions, name);
+        const data = await apiPut(
+          plan, customActivities, locationOverrides, tripConfig, suggestExclusions, name,
+          versie.current,
+        );
+        versie.current = data.updatedAt ?? null;
         setServerUpdate({ at: data.updatedAt, by: data.updatedBy });
         setSyncStatus('synced');
+        setConflict(null);
         setTimeout(() => setSyncStatus('idle'), 1500);
       } catch (e) {
-        setSyncStatus('offline');
+        if (e?.conflict) {
+          // Niet stilzwijgend overschrijven; de gebruiker kiest zelf
+          setConflict(e.conflict);
+          setSyncStatus('idle');
+        } else {
+          setSyncStatus('offline');
+        }
       }
     }, 500);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
@@ -3884,6 +3912,33 @@ export default function Planner({ authRequired }) {
           onOpenTripSettings={() => setSheet({ type: 'trip-settings' })}
         />
         <TabBar active={activeTab} setActive={setActiveTab} />
+
+        {conflict && (
+          <div style={{ padding: '0 20px' }}>
+            <ConflictMelding
+              door={conflict.door}
+              onLaadHunVersie={() => { setConflict(null); fetchData(true); }}
+              onForceer={async () => {
+                // Meteen schrijven zonder versiecontrole; het opslag-effect
+                // hoeft daar niet aan te pas te komen.
+                setConflict(null);
+                setSyncStatus('syncing');
+                try {
+                  const data = await apiPut(
+                    plan, customActivities, locationOverrides, tripConfig,
+                    suggestExclusions, name, undefined,
+                  );
+                  versie.current = data.updatedAt ?? null;
+                  setServerUpdate({ at: data.updatedAt, by: data.updatedBy });
+                  setSyncStatus('synced');
+                  setTimeout(() => setSyncStatus('idle'), 1500);
+                } catch {
+                  setSyncStatus('offline');
+                }
+              }}
+            />
+          </div>
+        )}
 
         {activeTab === 'plan' ? (
           <PlanView

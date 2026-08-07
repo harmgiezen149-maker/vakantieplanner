@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { parseCsv } from '@/lib/csv';
+import ConflictMelding from '@/components/ConflictMelding';
 import {
   toggleItem as pakToggle,
   setPacked as pakSetPacked,
@@ -21,6 +22,7 @@ export default function PackingList() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  const [conflict, setConflict] = useState(null);
   const [newCat, setNewCat] = useState('');
   const [draftItem, setDraftItem] = useState({}); // { [catId]: { label, qty } }
 
@@ -44,6 +46,9 @@ export default function PackingList() {
   // Voorkomt dat de focus-refresh (die o.a. vuurt na een confirm-popup)
   // de lokale wijziging overschrijft met oude serverdata.
   const dirty = useRef(false);
+  // updatedAt van het document zoals wij het kennen — de versie waarop onze
+  // wijziging is gebaseerd.
+  const versie = useRef(null);
 
   const load = useCallback(async () => {
     if (dirty.current) return;
@@ -54,6 +59,7 @@ export default function PackingList() {
       setItems(data.items ?? []);
       setUpdatedBy(data.updatedBy ?? null);
       setUpdatedAt(data.updatedAt ?? null);
+      versie.current = data.updatedAt ?? null;
       latest.current = { categories: data.categories ?? [], items: data.items ?? [] };
     } catch {
       // stil falen
@@ -69,8 +75,9 @@ export default function PackingList() {
     return () => window.removeEventListener('focus', onFocus);
   }, [load]);
 
-  // Centrale opslag: debounced, gebruikt altijd de meest recente ref-waarden
-  const persist = useCallback((nextCats, nextItems) => {
+  // Centrale opslag: debounced, gebruikt altijd de meest recente ref-waarden.
+  // negeerVersie = "toch de mijne opslaan" na een botsing.
+  const persist = useCallback((nextCats, nextItems, negeerVersie = false) => {
     latest.current = { categories: nextCats, items: nextItems };
     dirty.current = true;
     clearTimeout(saveTimer.current);
@@ -84,12 +91,20 @@ export default function PackingList() {
             categories: latest.current.categories,
             items: latest.current.items,
             updatedBy: name || null,
+            basisVersie: negeerVersie ? undefined : versie.current,
           }),
         });
         const data = await res.json();
+        if (res.status === 409) {
+          // Niet stilzwijgend overschrijven; de gebruiker kiest zelf
+          setConflict(data);
+          return;
+        }
         setUpdatedBy(data.updatedBy ?? null);
         setUpdatedAt(data.updatedAt ?? null);
+        versie.current = data.updatedAt ?? null;
         dirty.current = false;
+        setConflict(null);
       } catch {
         // negeer; volgende wijziging probeert opnieuw (dirty blijft staan)
       } finally {
@@ -366,6 +381,17 @@ export default function PackingList() {
             Maak je eigen categorieën en items aan, met aantal. De lijst is
             gedeeld — iedereen vinkt af wat ingepakt is.
           </p>
+        )}
+
+        {conflict && (
+          <ConflictMelding
+            door={conflict.door}
+            onLaadHunVersie={() => { dirty.current = false; setConflict(null); load(); }}
+            onForceer={() => {
+              setConflict(null);
+              persist(latest.current.categories, latest.current.items, true);
+            }}
+          />
         )}
 
         <div style={{ display: soloCategory ? 'none' : 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
