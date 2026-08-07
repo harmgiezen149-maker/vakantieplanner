@@ -15,10 +15,12 @@ import {
 import { COLORS } from '@/lib/data';
 import BackupBeheer from '@/components/BackupBeheer';
 import FoutenLijst from '@/components/FoutenLijst';
+import DeelLink from '@/components/DeelLink';
 
 const TABS = [
   { key: 'kopie', label: 'Reservekopieën', icon: Archive },
   { key: 'fouten', label: 'Foutenlogboek', icon: AlertTriangle },
+  { key: 'delen', label: 'Meekijk-link', icon: Share2 },
   { key: 'wissen', label: 'Opruimen', icon: Trash2 },
 ];
 
@@ -54,6 +56,7 @@ export default function Beheer() {
       <div style={S.inhoud}>
         {tab === 'kopie' && <BackupBeheer ingebed />}
         {tab === 'fouten' && <FoutenLijst ingebed />}
+        {tab === 'delen' && <DeelLink />}
         {tab === 'wissen' && <Opruimen />}
       </div>
     </div>

@@ -36,7 +36,8 @@ in `test/`. Ze dekken de rekenkundige kern: `buildDays` en de override-regels in
 de reisgroepering in `stayLog.js`, de inpaklijst-invariant in `packing.js`, het opruimen van
 reservekopieën in `backup.js`, het uitlezen van Maps-links in `maps.js`, het samenvoegen van
 meldingen in `errorLog.js`, de versiecontrole in `conflict.js`, de cachesleutels in
-`geoCache.js`, de reisstatistiek in `reisverslag.js`, de CSV-import en de
+`geoCache.js`, de reisstatistiek in `reisverslag.js`, de deel-link in `delen.js`,
+de CSV-import en de
 opschoning in `stayValidation.js`.
 
 Twee dingen om te weten als je tests toevoegt:
@@ -100,6 +101,7 @@ app/
   checklist/page.jsx      → Checklist
   verblijven/page.jsx     → StayLog        (logboek: kaart, cijfer, review, foto's)
   verslag/page.jsx        → Reisverslag    (terugblik: nachten, landen, cijfers)
+  bekijk/page.jsx         → Bekijken       (alleen-lezen deel-link, zonder PIN)
   beheer/page.jsx         → Beheer         (kopieën, fouten, opruimen — eigen wachtwoord)
   reservekopie/, fouten/  → sturen door naar /beheer (oude bladwijzers)
   layout.jsx, manifest.js, icon.svg, globals.css   (PWA + huisstijl)
@@ -121,6 +123,8 @@ app/
     verblijven/ GET/POST  verblijvenlogboek
     verblijven/upload/    uploadtoken voor Vercel Blob
     verblijven/foto/      foto verwijderen uit Blob (DELETE)
+    delen/      GET/POST/DELETE  deel-link beheren (beheer-gated)
+    delen/bekijk/ GET     de uitgeklede planning achter een token (open!)
 components/   Planner.jsx (planscherm), MapView.jsx, DayOverview.jsx,
               PackingList.jsx, Checklist.jsx, StayLog.jsx, LocationPicker.jsx,
               Beheer.jsx, BackupBeheer.jsx, FoutenLijst.jsx,
@@ -128,8 +132,8 @@ components/   Planner.jsx (planscherm), MapView.jsx, DayOverview.jsx,
   planner/    de sheets van het planscherm — zie hieronder
 lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
               (Maps-links + PIN), stayLog.js, stayTypes.js, backup.js, csv.js,
-              conflict.js, errorLog.js, geoCache.js, packing.js, reisverslag.js,
-              stayValidation.js, toegang.js, redis.js, useRoute.js
+              conflict.js, delen.js, errorLog.js, geoCache.js, packing.js,
+              reisverslag.js, stayValidation.js, toegang.js, redis.js, useRoute.js
 ```
 
 `components/Planner.jsx` was één bestand van 4.100 regels en is opgesplitst: alle sheets
@@ -166,7 +170,7 @@ Twee dingen om te weten:
 
 ## Datamodel
 
-Vijf losse Redis-documenten, elk één JSON-blob:
+Zes losse Redis-documenten, elk één JSON-blob:
 
 | Key | Vorm |
 | --- | --- |
@@ -175,6 +179,7 @@ Vijf losse Redis-documenten, elk één JSON-blob:
 | `planner:checklist` | `{ checked:{}, updatedBy, updatedAt }` |
 | `planner:verblijven` | `{ stays:[{id,name,locationLabel,coords,type,typeOther,country,countryCode,startDate,endDate,periodLabel,tripTitle,score,review,photos,source}], updatedBy, updatedAt }` |
 | `planner:fouten` | `{ fouten:[{bron,bericht,detail,pad,versie,aantal,eerst,laatst}], updatedAt }` — max 100 |
+| `planner:delen` | `{ token, actief, aangemaakt, aangemaaktDoor, ingetrokken? }` — één link tegelijk |
 
 Daarnaast staan er `cache:v1:*`-sleutels in dezelfde Redis. Die horen niet bij het
 datamodel: ze zijn afgeleid, hebben een vervaltijd en mogen op elk moment weg — zie
@@ -330,6 +335,18 @@ tweede kopie van de gate.
 uit `weigering()`) en toont de bijbehorende vraag. Dat is één state-machine met vier
 standen; hem opsplitsen in twee geneste poorten geeft precies de bug die er eerst in zat —
 de PIN klopte, en de wachtwoordvraag werd overgeslagen.
+
+**10b. `/api/delen/bekijk` is de enige route die bewust openstaat.**
+Zonder PIN, zonder beheercode — dat is het hele punt van een meekijk-link. De grendel is
+het token (32 hex, één tegelijk, intrekbaar). Wat naar buiten gaat wordt daarom bepaald
+door `publiekePlanning()` in `lib/delen.js`, en dat is een **witte lijst**: het bouwt een
+nieuw object uit de velden die het kent, in plaats van velden weg te strepen uit wat het
+krijgt. Voeg je later iets toe aan `planner:trip`, dan lekt dat dus niet automatisch mee.
+Houd die vorm zo. Wat er bewust níét in zit: `updatedBy` (namen van het gezin),
+`suggestExclusions`, het verblijvenlogboek, foto's, en activiteiten die op geen enkele dag
+staan. `/bekijk` heeft geen `PinPoort` en geen enkele knop die schrijft — er staat ook geen
+opslagcode in `components/Bekijken.jsx`, en dat is makkelijker te bewaken dan een
+alleen-lezen stand van `Planner`.
 
 **11. `export const dynamic = 'force-dynamic'` op elke API route.**
 Zonder dat cachet Vercel de GET en krijg je na opslaan een oude versie terug. Ook op
