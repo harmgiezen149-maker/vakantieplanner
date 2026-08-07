@@ -36,7 +36,8 @@ in `test/`. Ze dekken de rekenkundige kern: `buildDays` en de override-regels in
 de reisgroepering in `stayLog.js`, de inpaklijst-invariant in `packing.js`, het opruimen van
 reservekopieën in `backup.js`, het uitlezen van Maps-links in `maps.js`, het samenvoegen van
 meldingen in `errorLog.js`, de versiecontrole in `conflict.js`, de cachesleutels in
-`geoCache.js`, de CSV-import en de opschoning in `stayValidation.js`.
+`geoCache.js`, de reisstatistiek in `reisverslag.js`, de CSV-import en de
+opschoning in `stayValidation.js`.
 
 Twee dingen om te weten als je tests toevoegt:
 
@@ -98,6 +99,7 @@ app/
   inpakken/page.jsx       → PackingList
   checklist/page.jsx      → Checklist
   verblijven/page.jsx     → StayLog        (logboek: kaart, cijfer, review, foto's)
+  verslag/page.jsx        → Reisverslag    (terugblik: nachten, landen, cijfers)
   beheer/page.jsx         → Beheer         (kopieën, fouten, opruimen — eigen wachtwoord)
   reservekopie/, fouten/  → sturen door naar /beheer (oude bladwijzers)
   layout.jsx, manifest.js, icon.svg, globals.css   (PWA + huisstijl)
@@ -126,7 +128,7 @@ components/   Planner.jsx (planscherm), MapView.jsx, DayOverview.jsx,
   planner/    de sheets van het planscherm — zie hieronder
 lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
               (Maps-links + PIN), stayLog.js, stayTypes.js, backup.js, csv.js,
-              conflict.js, errorLog.js, geoCache.js, packing.js,
+              conflict.js, errorLog.js, geoCache.js, packing.js, reisverslag.js,
               stayValidation.js, toegang.js, redis.js, useRoute.js
 ```
 
@@ -358,6 +360,14 @@ elkaar aansluiten. Er staat dus **geen reis-id in het datamodel** — pas je de 
 een verblijf aan, dan verschuift de groepering vanzelf. Groeperen gebeurt op de hele
 lijst en niet op de gefilterde: anders hakt een filter een reis in stukken. De route op de
 kaart is een rechte lijn tussen de verblijven in datumvolgorde, geen echte rijroute.
+
+`lib/reisverslag.js` bouwt daarop voort en telt niets zelf op wat het datamodel al weet.
+Twee keuzes die daarin vastliggen en die je moet kennen voor je de cijfers aanpast: een
+nacht hoort bij de dag waaróp je slaapt (10 t/m 14 augustus = 4 nachten, zoals een
+camping rekent), en een verblijf **zonder cijfer telt wel mee als verblijf maar niet in
+het gemiddelde** — `null` is "nog niet beoordeeld", niet "een nul". Een reis over oud en
+nieuw verdeelt zijn nachten over beide jaren, maar telt als réis bij het jaar waarin hij
+eindigt; dat is dezelfde regel die de afgeleide naam ("aug 2026") gebruikt.
 
 **15. Het land is afgeleid, niet ingetypt.**
 `STAY_TYPES` en de landhulpjes staan in `lib/stayTypes.js` — een module **zonder**

@@ -833,9 +833,14 @@ export default function StayLog() {
   return (
     <div style={S.page}>
       <div style={S.inner}>
-        <Link href="/" style={S.backLink}>
-          <ArrowLeft size={16} /> Planner
-        </Link>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <Link href="/" style={S.backLink}>
+            <ArrowLeft size={16} /> Planner
+          </Link>
+          <Link href="/verslag" style={S.verslagLink}>
+            Terugblik <ArrowLeft size={14} style={{ transform: 'rotate(180deg)' }} />
+          </Link>
+        </div>
 
         <p style={S.kicker}>Vakantie · Logboek</p>
         <h1 style={S.title}>Waar we zijn geweest</h1>
@@ -1585,6 +1590,11 @@ const S = {
     background: COLORS.cream, color: COLORS.charcoal, minHeight: '100vh',
   },
   inner: { maxWidth: 720, margin: '0 auto', padding: '18px 20px 60px' },
+  verslagLink: {
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    fontSize: 13, color: COLORS.lake, textDecoration: 'none',
+    fontWeight: 500, marginBottom: 18,
+  },
   backLink: {
     color: COLORS.forest, fontSize: 14, textDecoration: 'none',
     display: 'inline-flex', alignItems: 'center', gap: 6,
