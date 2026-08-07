@@ -16,7 +16,8 @@ code-commentaar.
 ```bash
 npm install
 npm run dev          # http://localhost:3000
-npx next build       # moet slagen vóór je pusht
+npm test             # unit-tests, moeten slagen vóór je pusht
+npx next build       # moet ook slagen vóór je pusht
 ```
 
 In een websessie draait `npm install` al via de SessionStart-hook
@@ -26,8 +27,22 @@ In een websessie draait `npm install` al via de SessionStart-hook
 de build sloopt de draaiende dev-server (`ENOENT … vendor-chunks/…`). Stop de dev-server
 eerst; is het al misgegaan, dan `rm -rf .next` en opnieuw starten.
 
-Er zijn geen tests en geen linter-config. `npx next build` is de enige poort — draai die
-na elke wijziging. De build slaagt zonder Redis-env-vars (je ziet dan alleen
+**De poort is `npm test` én `npx next build`.** Beide moeten slagen vóór een merge naar
+`main`. Er is geen linter-config.
+
+De tests draaien op `node --test` (in Node ingebouwd, geen extra afhankelijkheid) en staan
+in `test/`. Ze dekken de rekenkundige kern: `buildDays` en de override-regels in `data.js`,
+de reisgroepering in `stayLog.js`, de inpaklijst-invariant in `packing.js`, het opruimen van
+reservekopieën in `backup.js`, het uitlezen van Maps-links in `maps.js`, de CSV-import en de
+opschoning in `stayValidation.js`.
+
+Twee dingen om te weten als je tests toevoegt:
+
+- **Alleen pure logica.** Componenten en API-routes worden niet getest; die controleer je in
+  de browser tegen een Redis-stub. Wil je iets uit een component testbaar maken, haal het
+  dan eerst naar `lib/` — zo zijn `packing.js` en `stayValidation.js` ontstaan.
+- **`lib/`-modules importeren elkaar relatief** (`./data.js`), niet via `@/lib/…`. De
+  padalias is van Next; plain Node kent hem niet en de tests draaien buiten Next om. De build slaagt zonder Redis-env-vars (je ziet dan alleen
 `[Upstash Redis] Unable to find environment variable` tijdens page-data-collectie); de
 API's falen dan pas op runtime.
 
@@ -43,7 +58,8 @@ Vaste volgorde voor elke wijziging:
 ```bash
 git pull --ff-only origin main     # eventuele web-edits eerst binnen
 # … wijzigingen …
-npx next build                     # POORT: slaagt dit niet, dan niet mergen
+npm test                           # POORT 1
+npx next build                     # POORT 2: slagen ze niet, dan niet mergen
 git add -A && git commit -m "…"
 git checkout main && git merge --ff-only <werkbranch>
 git push -u origin main
@@ -51,9 +67,9 @@ git push -u origin main
 
 Regels die daarbij horen:
 
-- **De build is de poort.** Er zijn geen tests en geen linter, dus `npx next build`
-  is de enige geautomatiseerde controle. Slaagt hij niet, dan gaat er niets naar
-  `main` — dan laat je het op een branch staan en meld je wat er stuk is.
+- **`npm test` en de build zijn samen de poort.** Slaagt één van de twee niet, dan
+  gaat er niets naar `main` — dan laat je het op een branch staan en meld je wat er
+  stuk is.
 - **Pushen naar `main` = live deployen.** Vercel deployt automatisch op `main`; het
   gezin gebruikt de app tijdens de vakantie. Bij iets dat je niet met een build kunt
   verifiëren (gedrag dat alleen met echte Redis-data blijkt, of een wijziging in het

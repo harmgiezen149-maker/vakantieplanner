@@ -2,6 +2,11 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { parseCsv } from '@/lib/csv';
+import {
+  toggleItem as pakToggle,
+  setPacked as pakSetPacked,
+  changeQty as pakChangeQty,
+} from '@/lib/packing';
 
 // Unieke id-generator (geen externe dependency nodig)
 const uid = () =>
@@ -276,22 +281,15 @@ export default function PackingList() {
     setDraftItem((d) => ({ ...d, [catId]: { label: '', qty: '' } }));
   };
 
-  // Vinkje: alles gepakt ↔ niets gepakt. Houdt de deelteller in sync.
+  // De drie handelingen die samen de invariant `checked ⟺ packed >= qty`
+  // bewaken staan in lib/packing.js, zodat ze op één plek kloppen en getest
+  // kunnen worden.
   const toggleItem = (itemId) => {
-    apply(categories, items.map((it) => {
-      if (it.id !== itemId) return it;
-      const nowChecked = !it.checked;
-      return { ...it, checked: nowChecked, packed: nowChecked ? it.qty : 0 };
-    }));
+    apply(categories, items.map((it) => it.id === itemId ? pakToggle(it) : it));
   };
 
-  // Deelteller: "alvast gepakt" aantal. Bij packed >= qty vinkt hij vanzelf af.
   const setPacked = (itemId, raw) => {
-    apply(categories, items.map((it) => {
-      if (it.id !== itemId) return it;
-      const n = Math.max(0, Math.min(it.qty, Math.floor(Number(raw) || 0)));
-      return { ...it, packed: n, checked: n >= it.qty };
-    }));
+    apply(categories, items.map((it) => it.id === itemId ? pakSetPacked(it, raw) : it));
   };
 
   const removeItem = (itemId) => {
@@ -325,18 +323,7 @@ export default function PackingList() {
   };
 
   const changeQty = (itemId, delta) => {
-    apply(categories, items.map((it) => {
-      if (it.id !== itemId) return it;
-      const qty = Math.max(0, it.qty + delta);
-      if (qty === 0) {
-        // "Dit jaar niet mee": item blijft staan, doorgestreept.
-        // Vinkje niet automatisch zetten — dat doet de gebruiker zelf.
-        return { ...it, qty, packed: 0 };
-      }
-      // Deelteller mee-clampen; afvink-status volgt de nieuwe verhouding
-      const packed = Math.min(it.packed ?? (it.checked ? it.qty : 0), qty);
-      return { ...it, qty, packed, checked: packed >= qty };
-    }));
+    apply(categories, items.map((it) => it.id === itemId ? pakChangeQty(it, delta) : it));
   };
 
   const setDraft = (catId, field, value) =>
