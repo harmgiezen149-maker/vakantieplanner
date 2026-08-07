@@ -4,6 +4,8 @@
 // POST { lat, lng, rMin, rMax } → { routes: [{ name, lengthKm, durationMin,
 //   coords: [lat,lng] (startpunt), distKm, network, symbol, website }] }
 
+import { cacheSleutel, uitCache, naarCache, TTL } from '@/lib/geoCache';
+
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
@@ -140,6 +142,12 @@ async function handle(request, latRaw, lngRaw, rMinRaw, rMaxRaw) {
   let rMinKm = Math.max(0, Number(rMinRaw) || 0) / 1000;
   if (rMinKm * 1000 >= rMax) rMinKm = 0;
 
+  // Cachesleutel op de geklemde waarden, niet op de ruwe invoer — anders
+  // krijgen rMax=99999 en rMax=50000 twee sleutels voor hetzelfde antwoord.
+  const sleutel = cacheSleutel('hiking', [lat, lng, rMinKm, rMax]);
+  const bewaard = await uitCache(sleutel);
+  if (bewaard) return Response.json(bewaard);
+
   const errors = [];
   const data = await fetchHikingRoutes(lat, lng, rMax, errors);
   if (!data) {
@@ -222,6 +230,9 @@ async function handle(request, latRaw, lngRaw, rMinRaw, rMaxRaw) {
     // geometrie optioneel — lijst blijft bruikbaar
   }
 
+  // Met geometrie erbij loopt dit antwoord makkelijk over het plafond van
+  // geoCache; dan slaat naarCache stil over en werkt de route als vanouds.
+  await naarCache(sleutel, { routes }, TTL.hiking);
   return Response.json({ routes });
 }
 

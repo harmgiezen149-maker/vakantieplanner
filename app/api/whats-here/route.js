@@ -5,6 +5,8 @@
 //
 // GET/POST { lat, lng } → { suggestions: [{ name, kind, emoji, coords, distM }] }
 
+import { cacheSleutel, uitCache, naarCache, TTL } from '@/lib/geoCache';
+
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
@@ -184,6 +186,12 @@ async function handle(request, latRaw, lngRaw) {
     return Response.json({ error: 'invalid_coords' }, { status: 400 });
   }
 
+  // Vier decimalen (~11 m): een klik op de kaart moet precies blijven, anders
+  // krijg je de POI's van het huizenblok ernaast te zien.
+  const sleutel = cacheSleutel('whatsHere', [lat, lng], 4);
+  const bewaard = await uitCache(sleutel);
+  if (bewaard) return Response.json(bewaard);
+
   const [pois, rev] = await Promise.all([
     nearbyPois(lat, lng),
     reverseGeocode(lat, lng),
@@ -197,7 +205,11 @@ async function handle(request, latRaw, lngRaw) {
     suggestions.unshift(rev);
   }
 
-  return Response.json({ suggestions, clicked: [lat, lng] });
+  const payload = { suggestions, clicked: [lat, lng] };
+  // Niets gevonden is meestal Overpass die niet meewerkte, niet een lege plek —
+  // dat wil je niet een week vasthouden.
+  if (suggestions.length) await naarCache(sleutel, payload, TTL.whatsHere);
+  return Response.json(payload);
 }
 
 export async function POST(request) {

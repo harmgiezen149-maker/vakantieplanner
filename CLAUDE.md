@@ -34,8 +34,8 @@ De tests draaien op `node --test` (in Node ingebouwd, geen extra afhankelijkheid
 in `test/`. Ze dekken de rekenkundige kern: `buildDays` en de override-regels in `data.js`,
 de reisgroepering in `stayLog.js`, de inpaklijst-invariant in `packing.js`, het opruimen van
 reservekopieën in `backup.js`, het uitlezen van Maps-links in `maps.js`, het samenvoegen van
-meldingen in `errorLog.js`, de versiecontrole in `conflict.js`, de CSV-import en de
-opschoning in `stayValidation.js`.
+meldingen in `errorLog.js`, de versiecontrole in `conflict.js`, de cachesleutels in
+`geoCache.js`, de CSV-import en de opschoning in `stayValidation.js`.
 
 Twee dingen om te weten als je tests toevoegt:
 
@@ -122,8 +122,8 @@ components/   Planner.jsx (planscherm), MapView.jsx, DayOverview.jsx,
   planner/    de sheets van het planscherm — zie hieronder
 lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
               (Maps-links + PIN), stayLog.js, stayTypes.js, backup.js, csv.js,
-              conflict.js, errorLog.js, packing.js, stayValidation.js,
-              redis.js, useRoute.js
+              conflict.js, errorLog.js, geoCache.js, packing.js,
+              stayValidation.js, redis.js, useRoute.js
 ```
 
 `components/Planner.jsx` was één bestand van 4.100 regels en is opgesplitst: alle sheets
@@ -160,7 +160,7 @@ Twee dingen om te weten:
 
 ## Datamodel
 
-Drie losse Redis-documenten, elk één JSON-blob:
+Vijf losse Redis-documenten, elk één JSON-blob:
 
 | Key | Vorm |
 | --- | --- |
@@ -169,6 +169,10 @@ Drie losse Redis-documenten, elk één JSON-blob:
 | `planner:checklist` | `{ checked:{}, updatedBy, updatedAt }` |
 | `planner:verblijven` | `{ stays:[{id,name,locationLabel,coords,type,typeOther,country,countryCode,startDate,endDate,periodLabel,tripTitle,score,review,photos,source}], updatedBy, updatedAt }` |
 | `planner:fouten` | `{ fouten:[{bron,bericht,detail,pad,versie,aantal,eerst,laatst}], updatedAt }` — max 100 |
+
+Daarnaast staan er `cache:v1:*`-sleutels in dezelfde Redis. Die horen niet bij het
+datamodel: ze zijn afgeleid, hebben een vervaltijd en mogen op elk moment weg — zie
+valkuil 7. Ze gaan dan ook **niet mee in de reservekopie**.
 
 De eerste drie lezen eenmalig een **legacy key** (`vosges:family-plan`,
 `vogezen2026:*`) als de nieuwe leeg is. Niet weghalen — dat is de migratie van de oude
@@ -254,6 +258,25 @@ weigeren of traag beantwoorden. Opgevangen met 6 endpoints in willekeurige volgo
 die tweedeling in stand — de zware query in één keer valt structureel om. Voor
 bezienswaardigheden is **Geoapify** (`GEOAPIFY_API_KEY`) het primaire pad en Overpass de
 reserve; voor wandelroute-relaties bestaat geen alternatief.
+
+Daar bovenop ligt `lib/geoCache.js`: geslaagde antwoorden van `suggest/`, `hiking/`,
+`whats-here/` en `geocode/` gaan onder `cache:v1:<naam>:<sleutel>` in Redis. Twee keer
+dezelfde omgeving opvragen kost dus één keer Overpass, en een omgeving die je eerder
+bekeek werkt ook op een dag dat de servers nors zijn. Vier regels bij het aanhaken van
+een nieuwe route:
+
+- **De sleutel staat op de geklémde waarden**, ná het opschonen van de parameters, niet
+  op de ruwe invoer — anders krijgen `radius=99999` en `radius=50000` twee sleutels voor
+  hetzelfde antwoord. Afronding bepaalt de trefkans: 2 decimalen (~1,1 km) voor een
+  omgeving, 4 (~11 m) voor een aangeklikt punt, 1 voor het land bij reverse geocoding.
+- **Alleen geslaagde, niet-lege antwoorden.** Een 502 of een lege lijst is meestal
+  Overpass die niet meewerkt, niet de werkelijkheid; die zit je anders een maand achterna.
+- **De cache mag nooit een verzoek laten mislukken.** Lezen én schrijven falen stil en
+  vallen terug op de externe dienst. Zonder Redis-env-vars werkt alles precies als
+  voorheen — dat is met opzet en is getest.
+- **Melden gaat via `console.warn`, niet via `meldServerFout()`.** Dat foutenlogboek
+  staat zelf in Redis, dus juist als de cache er niet bij kan komt de melding daar nooit
+  aan. `CACHE_VERSIE` ophogen laat alles onder de oude sleutel vanzelf vervallen.
 
 **8. `routeGeometry` staat alleen op nieuw toegevoegde wandelroutes.**
 Bij toevoegen wordt de lijn vereenvoudigd tot ≤200 punten (5 decimalen) en op de

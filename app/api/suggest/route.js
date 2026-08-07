@@ -7,6 +7,8 @@
 // POST { lat, lng, radius } of GET ?lat=&lng=&radius=[&pin=]
 // → { suggestions: [{ name, category, emoji, coords, distKm }] }
 
+import { cacheSleutel, uitCache, naarCache, TTL } from '@/lib/geoCache';
+
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
@@ -335,6 +337,13 @@ async function handle(request, latRaw, lngRaw, radiusRaw, rMinRaw) {
   let rMinKm = Math.max(0, Number(rMinRaw) || 0) / 1000;
   if (rMinKm * 1000 >= radius) rMinKm = 0;
 
+  // Sleutel op de geklemde waarden, zodat radius=99999 en radius=50000 niet
+  // twee keer hetzelfde antwoord ophalen. Twee decimalen ≈ 1,1 km — ruim
+  // binnen de zoekstraal van minimaal 2 km.
+  const sleutel = cacheSleutel('suggest', [lat, lng, radius, rMinKm]);
+  const bewaard = await uitCache(sleutel);
+  if (bewaard) return Response.json(bewaard);
+
   const errors = [];
 
   // 1. Geoapify (aanbevolen, betrouwbaar vanaf Vercel)
@@ -345,7 +354,9 @@ async function handle(request, latRaw, lngRaw, radiusRaw, rMinRaw) {
       const suggestions = await translateDescriptions(
         await enrichWithWikipedia(buildSuggestions(candidates, [lat, lng], rMinKm))
       );
-      return Response.json({ suggestions, source: 'geoapify' });
+      const payload = { suggestions, source: 'geoapify' };
+      await naarCache(sleutel, payload, TTL.suggest);
+      return Response.json(payload);
     } catch (err) {
       errors.push(`geoapify: ${String(err?.message ?? err)}`);
       // val door naar Overpass
@@ -358,7 +369,9 @@ async function handle(request, latRaw, lngRaw, radiusRaw, rMinRaw) {
     const suggestions = await translateDescriptions(
       await enrichWithWikipedia(buildSuggestions(candidates, [lat, lng], rMinKm))
     );
-    return Response.json({ suggestions, source: 'overpass' });
+    const payload = { suggestions, source: 'overpass' };
+    await naarCache(sleutel, payload, TTL.suggest);
+    return Response.json(payload);
   }
 
   const hint = apiKey

@@ -74,6 +74,12 @@ betrouwbaar:
 3. Voeg in Vercel toe: `GEOAPIFY_API_KEY` = `jouw-key`
 4. Redeploy
 
+Zoekresultaten worden bewaard: dezelfde omgeving een tweede keer opvragen
+gaat niet opnieuw naar buiten, maar komt uit de opslag. Dat scheelt wachten,
+en een omgeving die je eerder bekeek blijft werken op een dag dat de
+OpenStreetMap-servers niet meewerken. Een omgeving die je nog nooit hebt
+opgevraagd kan dan nog steeds mislukken — dat is niet weg te nemen.
+
 ### 6. (Optioneel) OpenRouteService voor routes
 
 De kaart toont per dag een route met afstand en rijtijd. Standaard gebruikt de app de publieke OSRM-server (geen key nodig, fair-use). Voor nauwkeurigere en stabielere routeberekening:

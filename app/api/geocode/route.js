@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { cacheSleutel, uitCache, naarCache, TTL } from '@/lib/geoCache';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +23,14 @@ const NOMINATIM_HEADERS = {
 // om het land automatisch af te leiden uit de locatie van een verblijf.
 // Accept-Language zorgt dat er "Frankrijk" terugkomt en niet "France".
 async function reverse(lat, lng) {
+  // Eén decimaal (~11 km) is ruim genoeg: we vragen alleen naar het land
+  // (zoom=5), en dat verandert niet binnen zo'n vak. Het scheelt het
+  // verblijvenlogboek een hoop wachten, want dat werkt bestaande verblijven
+  // sequentieel bij met ~1,1 s ertussen (Nominatim: 1 verzoek per seconde).
+  const sleutel = cacheSleutel('reverse', [lat, lng], 1);
+  const bewaard = await uitCache(sleutel);
+  if (bewaard) return NextResponse.json(bewaard);
+
   const url = 'https://nominatim.openstreetmap.org/reverse?' +
     `lat=${lat}&lon=${lng}&format=json&zoom=5&addressdetails=1`;
   const res = await fetch(url, { headers: NOMINATIM_HEADERS });
@@ -30,11 +39,15 @@ async function reverse(lat, lng) {
   }
   const raw = await res.json();
   const addr = raw?.address || {};
-  return NextResponse.json({
+  const payload = {
     country: addr.country || null,
     countryCode: addr.country_code ? String(addr.country_code).toUpperCase() : null,
     label: raw?.display_name || null,
-  });
+  };
+  // Alleen bewaren als er echt een land uit kwam; een leeg antwoord wil je
+  // niet een half jaar vasthouden.
+  if (payload.country) await naarCache(sleutel, payload, TTL.reverse);
+  return NextResponse.json(payload);
 }
 
 export async function GET(request) {
@@ -70,6 +83,10 @@ export async function GET(request) {
     return NextResponse.json({ error: 'Te veel zoekopdrachten, wacht even.' }, { status: 429 });
   }
 
+  const sleutel = cacheSleutel('geocode', [q]);
+  const bewaard = await uitCache(sleutel);
+  if (bewaard) return NextResponse.json(bewaard);
+
   try {
     // Wereldwijd zoeken — generieke planner, geen landenbeperking
     const url = `https://nominatim.openstreetmap.org/search?` +
@@ -92,6 +109,8 @@ export async function GET(request) {
       address: r.address || {},
     }));
 
+    // Nul resultaten niet bewaren: dat is vaak een half ingetypte zoekterm.
+    if (results.length) await naarCache(sleutel, { results }, TTL.geocode);
     return NextResponse.json({ results });
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });
