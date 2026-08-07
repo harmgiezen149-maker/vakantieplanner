@@ -2,6 +2,7 @@ import { put } from '@vercel/blob';
 import { getRedis } from '@/lib/redis';
 import { BACKUP_KEYS, BACKUP_PREFIX, valideerMomentopname } from '@/lib/backup';
 import { maakMomentopname } from '../route';
+import { magBeheren, weigering } from '@/lib/toegang';
 
 // Een momentopname terugzetten. Dit overschrijft de huidige documenten, dus:
 //
@@ -16,10 +17,8 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function POST(request) {
-  const pin = process.env.FAMILY_PIN;
-  if (pin && request.headers.get('x-family-pin') !== pin) {
-    return Response.json({ error: 'unauthorized' }, { status: 401 });
-  }
+  // Overschrijft alles. Dit is precies waarvoor het beheerderswachtwoord bestaat.
+  if (!magBeheren(request)) return weigering(request);
 
   let body;
   try {

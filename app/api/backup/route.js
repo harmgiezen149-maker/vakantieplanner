@@ -3,6 +3,7 @@ import { getRedis } from '@/lib/redis';
 import {
   BACKUP_KEYS, BACKUP_FORMAAT, BACKUP_PREFIX, backupPad, bepaalOpruiming,
 } from '@/lib/backup';
+import { magBeheren, weigering } from '@/lib/toegang';
 
 // Reservekopieën van alle Redis-documenten, als JSON in Vercel Blob.
 //
@@ -16,14 +17,14 @@ import {
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+// De cron heeft een eigen sleutel en komt langs beide sloten heen — die
+// aanroep komt van Vercel zelf, niet van een browser. Met de hand aftrappen
+// vanaf /beheer vraagt wél om de PIN én het beheerderswachtwoord.
 function magDitVerzoek(request) {
   const cronSecret = process.env.CRON_SECRET;
   const auth = request.headers.get('authorization');
   if (cronSecret && auth === `Bearer ${cronSecret}`) return true;
-
-  const pin = process.env.FAMILY_PIN;
-  if (!pin) return true; // geen PIN ingesteld → app staat sowieso open
-  return request.headers.get('x-family-pin') === pin;
+  return magBeheren(request);
 }
 
 function blobOntbreekt() {
@@ -34,9 +35,7 @@ function blobOntbreekt() {
 }
 
 export async function GET(request) {
-  if (!magDitVerzoek(request)) {
-    return Response.json({ error: 'unauthorized' }, { status: 401 });
-  }
+  if (!magDitVerzoek(request)) return weigering(request);
   if (!process.env.BLOB_READ_WRITE_TOKEN) return blobOntbreekt();
 
   try {
@@ -59,9 +58,7 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
-  if (!magDitVerzoek(request)) {
-    return Response.json({ error: 'unauthorized' }, { status: 401 });
-  }
+  if (!magDitVerzoek(request)) return weigering(request);
   return voerBackupUit();
 }
 

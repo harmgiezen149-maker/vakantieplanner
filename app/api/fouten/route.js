@@ -2,6 +2,7 @@ import { getRedis } from '@/lib/redis';
 import {
   FOUTEN_KEY, MAX_FOUTEN, normaliseerMelding, voegFoutToe, isRuis,
 } from '@/lib/errorLog';
+import { pinOk, magBeheren, weigering } from '@/lib/toegang';
 
 // Het foutenlogboek.
 //
@@ -26,10 +27,11 @@ function teVaak() {
   return false;
 }
 
+// Lezen mag met de familie-PIN; wissen vraagt om het beheerderswachtwoord.
+// Melden (POST) blijft bewust helemaal open — valkuil 18: een fout treedt soms
+// op vóórdat iemand is ingelogd.
 function magLezen(request) {
-  const pin = process.env.FAMILY_PIN;
-  if (!pin) return true;
-  return request.headers.get('x-family-pin') === pin;
+  return pinOk(request);
 }
 
 function normalize(raw) {
@@ -41,9 +43,7 @@ function normalize(raw) {
 }
 
 export async function GET(request) {
-  if (!magLezen(request)) {
-    return Response.json({ error: 'unauthorized' }, { status: 401 });
-  }
+  if (!magLezen(request)) return weigering(request);
   try {
     const redis = getRedis();
     const data = normalize(await redis.get(FOUTEN_KEY));
@@ -90,9 +90,7 @@ export async function POST(request) {
 }
 
 export async function DELETE(request) {
-  if (!magLezen(request)) {
-    return Response.json({ error: 'unauthorized' }, { status: 401 });
-  }
+  if (!magBeheren(request)) return weigering(request);
   try {
     const redis = getRedis();
     await redis.set(FOUTEN_KEY, JSON.stringify({ fouten: [], updatedAt: new Date().toISOString() }));

@@ -98,6 +98,8 @@ app/
   inpakken/page.jsx       → PackingList
   checklist/page.jsx      → Checklist
   verblijven/page.jsx     → StayLog        (logboek: kaart, cijfer, review, foto's)
+  beheer/page.jsx         → Beheer         (kopieën, fouten, opruimen — eigen wachtwoord)
+  reservekopie/, fouten/  → sturen door naar /beheer (oude bladwijzers)
   layout.jsx, manifest.js, icon.svg, globals.css   (PWA + huisstijl)
   api/
     plan/       GET/PUT   hoofddocument (dagen, activiteiten, reisconfig)
@@ -119,12 +121,13 @@ app/
     verblijven/foto/      foto verwijderen uit Blob (DELETE)
 components/   Planner.jsx (planscherm), MapView.jsx, DayOverview.jsx,
               PackingList.jsx, Checklist.jsx, StayLog.jsx, LocationPicker.jsx,
-              ConflictMelding.jsx (botsingsbalk), Foutmelder.jsx
+              Beheer.jsx, BackupBeheer.jsx, FoutenLijst.jsx,
+              Poort.jsx (PinPoort + BeheerPoort), ConflictMelding.jsx, Foutmelder.jsx
   planner/    de sheets van het planscherm — zie hieronder
 lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
               (Maps-links + PIN), stayLog.js, stayTypes.js, backup.js, csv.js,
               conflict.js, errorLog.js, geoCache.js, packing.js,
-              stayValidation.js, redis.js, useRoute.js
+              stayValidation.js, toegang.js, redis.js, useRoute.js
 ```
 
 `components/Planner.jsx` was één bestand van 4.100 regels en is opgesplitst: alle sheets
@@ -300,14 +303,31 @@ Staat `FAMILY_PIN` niet ingesteld, dan is alles open — inclusief
 route `X-Family-Pin` (de client haalt hem uit `localStorage['planner-pin']`). Nieuwe API
 routes: neem die check over, anders is dat een gat.
 
-**Maar: alleen het beginscherm kan om die PIN vrágen.** `PinGate` staat in
-`components/Planner.jsx` en nergens anders. Elke andere pagina leest hem via `getPin()`
-en gaat ervan uit dat hij er al staat. Gevolg: open je `/reservekopie` of `/fouten` op
-een apparaat dat nooit via `/` binnenkwam — een tweede browser, de geïnstalleerde app
-naast de browser — dan krijg je 401's en geen enkele manier om alsnog in te loggen.
-Bouw je een nieuwe pagina die de PIN nodig heeft, dan erf je dat probleem. De oplossing
-(`PinGate` eruit halen naar iets dat elke pagina kan gebruiken) staat als stap 1 in
-`ROADMAP.md`; los het daar op en niet met een tweede kopie van de gate.
+**Er zijn twee sloten, en ze doen niet hetzelfde.** `lib/toegang.js` is de enige plek
+waar dat wordt beslist:
+
+| | env var | header | waarvoor |
+| --- | --- | --- | --- |
+| Familie-PIN | `FAMILY_PIN` | `X-Family-Pin` | "is dit het gezin?" |
+| Beheer | `BEHEER_WACHTWOORD` | `X-Beheer-Code` | terugzetten, downloaden, wissen |
+
+Beheer is een **extra laag bovenop** de PIN (`magBeheren()` = allebei), geen vervanging.
+Allebei optioneel: niet ingesteld = dat slot staat open, zodat er niets breekt vóórdat
+de eigenaar de variabele zet. Beheer geldt voor `GET/POST /api/backup`,
+`/api/backup/download`, `/api/backup/restore` en `DELETE /api/fouten`. **`POST
+/api/fouten` blijft open** — valkuil 18. De cron met `CRON_SECRET` komt langs beide.
+
+**De poort staat in `components/Poort.jsx`, niet in een pagina.** Hij zat vroeger als
+`PinGate` binnenin `Planner.jsx`, en dus kon alléén het beginscherm om een PIN vragen;
+wie `/reservekopie` opende op een apparaat dat nooit via `/` binnenkwam kreeg 401's
+zonder manier om in te loggen. Nu zet je `<PinPoort>` of `<BeheerPoort>` om een pagina
+heen. Bouw je een nieuwe pagina die toegang nodig heeft: gebruik die wrapper, maak geen
+tweede kopie van de gate.
+
+`BeheerPoort` leest uit het 401-antwoord **welk** slot dicht zat (`{ slot: 'pin' | 'beheer' }`
+uit `weigering()`) en toont de bijbehorende vraag. Dat is één state-machine met vier
+standen; hem opsplitsen in twee geneste poorten geeft precies de bug die er eerst in zat —
+de PIN klopte, en de wachtwoordvraag werd overgeslagen.
 
 **11. `export const dynamic = 'force-dynamic'` op elke API route.**
 Zonder dat cachet Vercel de GET en krijg je na opslaan een oude versie terug. Ook op

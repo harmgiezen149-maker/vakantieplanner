@@ -1,10 +1,6 @@
-import FoutenLijst from '@/components/FoutenLijst';
+import { redirect } from 'next/navigation';
 
-export const metadata = {
-  title: 'Fouten — Vakantieplanner',
-  description: 'Wat er misging in de app, in de browser en op de server',
-};
-
+// Het foutenlogboek staat sinds de beheerderspagina onder /beheer.
 export default function FoutenPage() {
-  return <FoutenLijst />;
+  redirect('/beheer');
 }

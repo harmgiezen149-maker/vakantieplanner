@@ -1,10 +1,7 @@
-import BackupBeheer from '@/components/BackupBeheer';
+import { redirect } from 'next/navigation';
 
-export const metadata = {
-  title: 'Reservekopieën — Vakantieplanner',
-  description: 'Automatische reservekopieën van de planning, inpaklijst, checklist en het verblijvenlogboek',
-};
-
+// De reservekopieën wonen sinds de beheerderspagina onder /beheer. Deze route
+// blijft bestaan zodat bestaande bladwijzers en snelkoppelingen blijven werken.
 export default function ReservekopiePage() {
-  return <BackupBeheer />;
+  redirect('/beheer');
 }

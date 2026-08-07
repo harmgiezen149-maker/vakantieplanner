@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { COLORS } from '@/lib/data';
 import { getPin } from '@/lib/maps';
+import { beheerHeaders } from '@/components/Poort';
 
 const tijdNL = (iso) => {
   if (!iso) return '';
@@ -16,7 +17,9 @@ const tijdNL = (iso) => {
   return vandaag ? `vandaag ${klok}` : `${d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' })} ${klok}`;
 };
 
-export default function FoutenLijst() {
+// `ingebed` = getoond binnen /beheer, dat zijn eigen kop en terug-link
+// al heeft. Los aangeroepen houdt hij zijn eigen paginakop.
+export default function FoutenLijst({ ingebed = false }) {
   const [fouten, setFouten] = useState([]);
   const [laden, setLaden] = useState(true);
   const [fout, setFout] = useState(null);
@@ -44,9 +47,10 @@ export default function FoutenLijst() {
   const wis = async () => {
     if (!window.confirm('Alle gemelde fouten wissen?')) return;
     try {
+      // Wissen is een beheeractie — vandaar de tweede sleutel.
       await fetch('/api/fouten', {
         method: 'DELETE',
-        headers: { 'X-Family-Pin': getPin() },
+        headers: beheerHeaders(),
       });
       await laad();
     } catch (e) {
@@ -55,12 +59,15 @@ export default function FoutenLijst() {
   };
 
   return (
-    <div style={S.page}>
-      <div style={S.inner}>
-        <Link href="/" style={S.backLink}><ArrowLeft size={16} /> Planner</Link>
-
-        <p style={S.kicker}>Beheer</p>
-        <h1 style={S.title}>Wat er misging</h1>
+    <div style={ingebed ? S.pageIngebed : S.page}>
+      <div style={ingebed ? S.innerIngebed : S.inner}>
+        {!ingebed && (
+          <>
+            <Link href="/" style={S.backLink}><ArrowLeft size={16} /> Planner</Link>
+            <p style={S.kicker}>Beheer</p>
+          </>
+        )}
+        {!ingebed && <h1 style={S.title}>Wat er misging</h1>}
         <p style={S.sub}>
           Fouten die in de app optreden — in de browser van wie hem gebruikt, en
           op de server — komen hier terecht. Dezelfde fout op dezelfde plek wordt
@@ -117,6 +124,8 @@ export default function FoutenLijst() {
 }
 
 const S = {
+  pageIngebed: { fontFamily: "'DM Sans', sans-serif", color: COLORS.charcoal },
+  innerIngebed: {},
   page: {
     fontFamily: "'DM Sans', sans-serif",
     background: COLORS.cream, color: COLORS.charcoal, minHeight: '100vh',

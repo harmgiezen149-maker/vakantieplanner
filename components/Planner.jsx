@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import Link from 'next/link';
 import {
   Plus, X, Trash2, Sparkles, Calendar as CalendarIcon,
-  ChevronRight, RefreshCw, User, Wifi, WifiOff, Check, AlertCircle, Lock, MapPin, Map as MapIcon,
+  ChevronRight, RefreshCw, User, Wifi, WifiOff, Check, AlertCircle, MapPin, Map as MapIcon,
   Pencil, Car, ChevronUp, ChevronDown, CheckSquare, Backpack,
   Settings, CalendarRange, Compass, Star, ShieldCheck,
 } from 'lucide-react';
@@ -14,7 +14,7 @@ import {
   getMapsLink, applyLocationOverride, formatDistance, formatDuration,
 } from '@/lib/data';
 import { useRoute } from '@/lib/useRoute';
-import { getPin, setPin } from '@/lib/maps';
+import { getPin } from '@/lib/maps';
 import { archiveTripStays } from '@/lib/stayLog';
 import ConflictMelding from '@/components/ConflictMelding';
 
@@ -96,115 +96,6 @@ const TopoBackground = () => (
     <rect width="100%" height="100%" fill="url(#topo)" />
   </svg>
 );
-
-// ============ PIN GATE ============
-
-const PinGate = ({ onUnlock }) => {
-  const [pin, setPinInput] = useState('');
-  const [error, setError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-
-  const submit = async (e) => {
-    e?.preventDefault?.();
-    if (!pin.trim()) return;
-    setSubmitting(true);
-    setError('');
-    setPin(pin.trim());
-    try {
-      const res = await fetch('/api/plan', {
-        headers: { 'X-Family-Pin': pin.trim() },
-        cache: 'no-store',
-      });
-      if (res.status === 401) {
-        setError('PIN klopt niet');
-        setSubmitting(false);
-        return;
-      }
-      if (!res.ok) {
-        setError('Server-fout');
-        setSubmitting(false);
-        return;
-      }
-      onUnlock();
-    } catch (err) {
-      setError('Netwerkfout');
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div style={{
-      minHeight: '100vh', background: COLORS.cream,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: 20, position: 'relative',
-    }}>
-      <TopoBackground />
-      <div style={{
-        position: 'relative', zIndex: 1,
-        maxWidth: 360, width: '100%',
-        background: COLORS.creamSoft,
-        borderRadius: 20, padding: 28,
-        boxShadow: '0 6px 24px rgba(31,41,34,0.08)',
-        border: `1px solid ${COLORS.hairline}`,
-      }}>
-        <div style={{
-          width: 48, height: 48, borderRadius: 12,
-          background: COLORS.forest, color: COLORS.cream,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          marginBottom: 16,
-        }}>
-          <Lock size={22} />
-        </div>
-        <h1 style={{
-          fontFamily: "'Fraunces', serif",
-          fontSize: 24, margin: '0 0 6px',
-          color: COLORS.forest, fontWeight: 500, letterSpacing: '-0.01em',
-        }}>Familie-PIN</h1>
-        <p style={{ color: COLORS.ink, fontSize: 13, margin: '0 0 18px', lineHeight: 1.5 }}>
-          Deze planner is alleen voor het gezin. Voer de gedeelde PIN in om verder te gaan.
-        </p>
-        <input
-          type="password"
-          value={pin}
-          onChange={(e) => setPinInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submit()}
-          placeholder="PIN"
-          autoFocus
-          style={{
-            width: '100%', padding: 14,
-            background: COLORS.cream,
-            border: `1px solid ${COLORS.hairline}`,
-            borderRadius: 10, fontSize: 16,
-            fontFamily: "'DM Sans', sans-serif",
-            color: COLORS.charcoal,
-          }}
-        />
-        {error && (
-          <div style={{
-            marginTop: 10, fontSize: 12, color: '#B5443B',
-            display: 'flex', alignItems: 'center', gap: 6,
-          }}>
-            <AlertCircle size={14} /> {error}
-          </div>
-        )}
-        <button
-          onClick={submit}
-          disabled={submitting || !pin.trim()}
-          style={{
-            marginTop: 16, width: '100%', padding: 14,
-            background: pin.trim() ? COLORS.forest : COLORS.hairline,
-            color: pin.trim() ? COLORS.cream : COLORS.inkLight,
-            border: 'none', borderRadius: 10, fontWeight: 600,
-            fontFamily: "'DM Sans', sans-serif", fontSize: 14,
-            cursor: pin.trim() ? 'pointer' : 'not-allowed',
-          }}
-        >
-          {submitting ? 'Controleren…' : 'Verder'}
-        </button>
-      </div>
-    </div>
-  );
-};
 
 // ============ HEADER ============
 
@@ -1070,7 +961,7 @@ const SettingsSheet = ({ onClose, onOpenTripSettings, onClearPlan, onNewVacation
   <Sheet onClose={onClose} title="Planning beheren">
     <div style={{ padding: '8px 20px 24px', display: 'flex', flexDirection: 'column', gap: 10 }}>
       <Link
-        href="/reservekopie"
+        href="/beheer"
         style={{
           padding: '14px 16px', background: COLORS.creamSoft,
           border: `1px solid ${COLORS.hairline}`, borderRadius: 12,
@@ -1081,35 +972,15 @@ const SettingsSheet = ({ onClose, onOpenTripSettings, onClearPlan, onNewVacation
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
           <ShieldCheck size={16} color={COLORS.moss} />
           <span style={{ fontWeight: 600, color: COLORS.forest, fontSize: 14 }}>
-            Reservekopieën
+            Beheer
           </span>
         </div>
         <div style={{ fontSize: 12, color: COLORS.ink, lineHeight: 1.5 }}>
-          Elke nacht wordt alles automatisch bewaard. Hier kun je een kopie
-          downloaden of er een terugzetten.
+          Reservekopieën, het foutenlogboek en opruimen — achter een eigen
+          wachtwoord, want je kunt er dingen terugzetten en wissen.
         </div>
       </Link>
 
-      <Link
-        href="/fouten"
-        style={{
-          padding: '14px 16px', background: COLORS.creamSoft,
-          border: `1px solid ${COLORS.hairline}`, borderRadius: 12,
-          textAlign: 'left', cursor: 'pointer', textDecoration: 'none',
-          display: 'block',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-          <AlertCircle size={16} color={COLORS.slate} />
-          <span style={{ fontWeight: 600, color: COLORS.forest, fontSize: 14 }}>
-            Wat er misging
-          </span>
-        </div>
-        <div style={{ fontSize: 12, color: COLORS.ink, lineHeight: 1.5 }}>
-          Fouten die in de app optreden komen hier terecht, zodat je ze ziet
-          zonder dat iemand het hoeft te melden.
-        </div>
-      </Link>
 
       <button
         onClick={onOpenTripSettings}
@@ -1180,8 +1051,7 @@ const SettingsSheet = ({ onClose, onOpenTripSettings, onClearPlan, onNewVacation
 
 // ============ MAIN APP ============
 
-export default function Planner({ authRequired }) {
-  const [unlocked, setUnlocked] = useState(!authRequired);
+export default function Planner() {
   const [activeTab, setActiveTab] = useState('plan');
   const [plan, setPlan] = useState({});
   const [customActivities, setCustomActivities] = useState([]);
@@ -1243,20 +1113,19 @@ export default function Planner({ authRequired }) {
   }, []);
 
   useEffect(() => {
-    if (unlocked) fetchData();
-  }, [unlocked, fetchData]);
+    fetchData();
+  }, [fetchData]);
 
   // Refresh on focus
   useEffect(() => {
-    if (!unlocked) return;
     const onFocus = () => fetchData(false);
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
-  }, [unlocked, fetchData]);
+  }, [fetchData]);
 
   // Debounced auto-save
   useEffect(() => {
-    if (!unlocked || loading) return;
+    if (loading) return;
     if (skipNextSave.current) {
       skipNextSave.current = false;
       return;
@@ -1285,7 +1154,7 @@ export default function Planner({ authRequired }) {
       }
     }, 500);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [plan, customActivities, locationOverrides, tripConfig, suggestExclusions, name, unlocked, loading]);
+  }, [plan, customActivities, locationOverrides, tripConfig, suggestExclusions, name, loading]);
 
   // Dynamische dagenlijst uit de reisconfiguratie
   const days = useMemo(() => buildDays(tripConfig), [tripConfig]);
@@ -1479,9 +1348,46 @@ export default function Planner({ authRequired }) {
     return serverUpdate.by ? `${serverUpdate.by} · ${dateStr}` : dateStr;
   }, [serverUpdate]);
 
-  if (authRequired && !unlocked) {
-    return <PinGate onUnlock={() => setUnlocked(true)} />;
-  }
+  // Losse functies (in plaats van closures in de JSX) omdat /beheer er
+  // rechtstreeks naartoe kan linken: ?beheer=wissen of ?beheer=nieuw.
+  const vraagPlanningWissen = () => {
+    setSheet({
+      type: 'confirm',
+      title: 'Hele planning wissen?',
+      message: `Alle ${days.length || ''} dagen worden leeggemaakt. Eigen activiteiten en reisinstellingen blijven bewaard.`,
+      confirmText: 'Alles wissen',
+      onConfirm: () => setPlan({}),
+    });
+  };
+
+  const vraagNieuweVakantie = () => {
+    const teArchiveren = (tripConfig.stays || []).length;
+    const basis = 'De planning en eigen activiteiten worden gewist. Daarna stel je de nieuwe periode en verblijven in. De inpaklijst en auto-checklist blijven staan.';
+    setSheet({
+      type: 'confirm',
+      title: 'Nieuwe vakantie starten?',
+      message: teArchiveren
+        ? `${basis}\n\nJe hebt ${teArchiveren} ${teArchiveren === 1 ? 'verblijf' : 'verblijven'} ingesteld. Wil je ${teArchiveren === 1 ? 'dat' : 'die'} eerst bewaren in het verblijvenlogboek, zodat je er later een cijfer en foto's aan kunt hangen?`
+        : basis,
+      confirmText: teArchiveren ? 'Bewaren en starten' : 'Nieuwe vakantie',
+      onConfirm: () => archiveerEnStart(Boolean(teArchiveren)),
+      altText: teArchiveren ? 'Starten zonder bewaren' : undefined,
+      onAlt: teArchiveren ? () => archiveerEnStart(false) : undefined,
+    });
+  };
+
+  // Vanaf /beheer doorgestuurd? Open dan meteen de bijbehorende vraag, en haal
+  // de parameter uit de URL zodat een verversing hem niet opnieuw opent.
+  useEffect(() => {
+    if (loading) return;
+    const params = new URLSearchParams(window.location.search);
+    const actie = params.get('beheer');
+    if (actie !== 'wissen' && actie !== 'nieuw') return;
+    window.history.replaceState({}, '', window.location.pathname);
+    if (actie === 'wissen') vraagPlanningWissen();
+    else vraagNieuweVakantie();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   if (loading) {
     return (
@@ -1693,32 +1599,8 @@ export default function Planner({ authRequired }) {
       {sheet?.type === 'settings' && (
         <SettingsSheet
           onOpenTripSettings={() => setSheet({ type: 'trip-settings' })}
-          onClearPlan={() => {
-            setSheet({
-              type: 'confirm',
-              title: 'Hele planning wissen?',
-              message: `Alle ${days.length || ''} dagen worden leeggemaakt. Eigen activiteiten en reisinstellingen blijven bewaard.`,
-              confirmText: 'Alles wissen',
-              onConfirm: () => setPlan({}),
-            });
-          }}
-          onNewVacation={() => {
-            const teArchiveren = (tripConfig.stays || []).length;
-            const basis = 'De planning en eigen activiteiten worden gewist. Daarna stel je de nieuwe periode en verblijven in. De inpaklijst en auto-checklist blijven staan.';
-            setSheet({
-              type: 'confirm',
-              title: 'Nieuwe vakantie starten?',
-              message: teArchiveren
-                ? `${basis}\n\nJe hebt ${teArchiveren} ${teArchiveren === 1 ? 'verblijf' : 'verblijven'} ingesteld. Wil je ${teArchiveren === 1 ? 'dat' : 'die'} eerst bewaren in het verblijvenlogboek, zodat je er later een cijfer en foto's aan kunt hangen?`
-                : basis,
-              confirmText: teArchiveren ? 'Bewaren en starten' : 'Nieuwe vakantie',
-              onConfirm: teArchiveren
-                ? () => archiveerEnStart(true)
-                : () => archiveerEnStart(false),
-              altText: teArchiveren ? 'Starten zonder bewaren' : undefined,
-              onAlt: teArchiveren ? () => archiveerEnStart(false) : undefined,
-            });
-          }}
+          onClearPlan={vraagPlanningWissen}
+          onNewVacation={vraagNieuweVakantie}
           onClose={() => setSheet(null)}
         />
       )}

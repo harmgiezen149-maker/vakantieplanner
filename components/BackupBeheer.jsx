@@ -6,7 +6,7 @@ import {
   ArrowLeft, Download, RefreshCw, Loader2, ShieldCheck, AlertTriangle, RotateCcw,
 } from 'lucide-react';
 import { COLORS } from '@/lib/data';
-import { getPin } from '@/lib/maps';
+import { beheerHeaders } from '@/components/Poort';
 
 const kb = (n) => (n >= 1024 * 1024
   ? `${(n / 1024 / 1024).toFixed(1)} MB`
@@ -18,7 +18,9 @@ const datumNL = (iso) => {
   return d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'long', year: 'numeric' });
 };
 
-export default function BackupBeheer() {
+// `ingebed` = getoond binnen /beheer, dat zijn eigen kop en terug-link
+// al heeft. Los aangeroepen houdt hij zijn eigen paginakop.
+export default function BackupBeheer({ ingebed = false }) {
   const [kopieen, setKopieen] = useState([]);
   const [laden, setLaden] = useState(true);
   const [bezig, setBezig] = useState(null); // 'maken' | 'terugzetten'
@@ -31,7 +33,7 @@ export default function BackupBeheer() {
     setLaden(true);
     try {
       const res = await fetch('/api/backup', {
-        headers: { 'X-Family-Pin': getPin() },
+        headers: beheerHeaders(),
         cache: 'no-store',
       });
       const data = await res.json();
@@ -57,7 +59,7 @@ export default function BackupBeheer() {
     try {
       const res = await fetch('/api/backup', {
         method: 'POST',
-        headers: { 'X-Family-Pin': getPin() },
+        headers: beheerHeaders(),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || data.error);
@@ -77,7 +79,7 @@ export default function BackupBeheer() {
     try {
       const res = await fetch('/api/backup/restore', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Family-Pin': getPin() },
+        headers: beheerHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ url: terugzetten.url, bevestigd: true }),
       });
       const data = await res.json();
@@ -98,12 +100,15 @@ export default function BackupBeheer() {
   };
 
   return (
-    <div style={S.page}>
-      <div style={S.inner}>
-        <Link href="/" style={S.backLink}><ArrowLeft size={16} /> Planner</Link>
-
-        <p style={S.kicker}>Beheer</p>
-        <h1 style={S.title}>Reservekopieën</h1>
+    <div style={ingebed ? S.pageIngebed : S.page}>
+      <div style={ingebed ? S.innerIngebed : S.inner}>
+        {!ingebed && (
+          <>
+            <Link href="/" style={S.backLink}><ArrowLeft size={16} /> Planner</Link>
+            <p style={S.kicker}>Beheer</p>
+          </>
+        )}
+        {!ingebed && <h1 style={S.title}>Reservekopieën</h1>}
         <p style={S.sub}>
           Elke nacht wordt automatisch een kopie gemaakt van de planning, de
           inpaklijst, de checklist en het verblijvenlogboek. Kopieën van de
@@ -226,7 +231,7 @@ export default function BackupBeheer() {
 async function downloadAlles() {
   try {
     const res = await fetch('/api/backup/download', {
-      headers: { 'X-Family-Pin': getPin() },
+      headers: beheerHeaders(),
       cache: 'no-store',
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -245,6 +250,8 @@ async function downloadAlles() {
 }
 
 const S = {
+  pageIngebed: { fontFamily: "'DM Sans', sans-serif", color: COLORS.charcoal },
+  innerIngebed: {},
   page: {
     fontFamily: "'DM Sans', sans-serif",
     background: COLORS.cream, color: COLORS.charcoal, minHeight: '100vh',

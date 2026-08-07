@@ -1,4 +1,5 @@
 import { maakMomentopname } from '../route';
+import { magBeheren, weigering } from '@/lib/toegang';
 
 // Alles ineens downloaden als JSON-bestand. Werkt bewust zónder Blob: dit is
 // het pad dat het altijd doet, ook als de opslag niet is ingesteld of eruit
@@ -8,10 +9,8 @@ import { maakMomentopname } from '../route';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request) {
-  const pin = process.env.FAMILY_PIN;
-  if (pin && request.headers.get('x-family-pin') !== pin) {
-    return Response.json({ error: 'unauthorized' }, { status: 401 });
-  }
+  // Dit levert álle documenten in één bestand — dus beheer, niet alleen de PIN.
+  if (!magBeheren(request)) return weigering(request);
 
   try {
     const momentopname = await maakMomentopname();

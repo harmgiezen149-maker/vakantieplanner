@@ -61,6 +61,22 @@ Wil je dat alleen het gezin de planner kan zien? Voeg een PIN toe:
 
 Zonder deze variabele is de URL gewoon publiek (URL is dan de "geheime" toegangssleutel).
 
+**Voer de PIN één keer in per apparaat.** Elke pagina vraagt er zelf om als hij nog
+niet bekend is, dus ook als je bijvoorbeeld rechtstreeks `/beheer` opent.
+
+### 4b. (Aanbevolen) Beheerderswachtwoord
+
+De familie-PIN geeft toegang tot de planner. Daarnaast is er een tweede slot voor de
+dingen die je maar één keer verkeerd hoeft te doen: een reservekopie terugzetten (dat
+overschrijft alles), alles downloaden, en het foutenlogboek wissen.
+
+1. **Settings** → **Environment Variables**
+2. Voeg toe: `BEHEER_WACHTWOORD` = `een-tweede-geheim`
+3. Redeploy
+
+Zonder deze variabele valt `/beheer` terug op alleen de familie-PIN — er breekt dus
+niets als je hem (nog) niet zet.
+
 ### 5. (Aanbevolen) Geoapify voor omgevingssuggesties
 
 De "Ontdek de omgeving"-knop zoekt bezienswaardigheden, zwemplekken en
