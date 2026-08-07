@@ -19,6 +19,8 @@ import { formatTemp } from '@/lib/weer';
 import { getPin } from '@/lib/maps';
 import { archiveTripStays } from '@/lib/stayLog';
 import ConflictMelding from '@/components/ConflictMelding';
+import OfflineMelding from '@/components/OfflineMelding';
+import { bewaarLokaal, leesLokaal } from '@/lib/offline';
 
 // De sheets staan sinds de opsplitsing in components/planner/. Ze hangen
 // alleen aan hun props — geen enkele leest de state van Planner — dus ze
@@ -1077,6 +1079,9 @@ export default function Planner() {
   const [syncStatus, setSyncStatus] = useState('idle'); // 'idle' | 'syncing' | 'synced' | 'offline'
   const [serverUpdate, setServerUpdate] = useState({ at: null, by: null });
   const [conflict, setConflict] = useState(null);
+  // Gevuld als we de laatst bewaarde versie tonen omdat de server niet
+  // bereikbaar was. Zolang dit staat is opslaan geblokkeerd.
+  const [offlineOp, setOfflineOp] = useState(null);
   const [name, setName] = useState('');
 
   const saveTimer = useRef(null);
@@ -1100,6 +1105,8 @@ export default function Planner() {
     try {
       const data = await apiGet();
       skipNextSave.current = true;
+      setOfflineOp(null);
+      bewaarLokaal('trip', data);
       versie.current = data.updatedAt ?? null;
       setPlan(data.plan || {});
       setCustomActivities(data.customActivities || []);
@@ -1115,10 +1122,26 @@ export default function Planner() {
       }
       firstLoad.current = false;
     } catch (e) {
-      if (e.message === 'unauthorized') {
-        setUnlocked(false);
-      } else {
-        setSyncStatus('offline');
+      setSyncStatus('offline');
+      // Een 401 is geen verbindingsprobleem — dan hoort de PIN-poort te
+      // verschijnen, niet een gedateerde kopie. Die poort zit om de pagina
+      // heen (components/Poort.jsx) en regelt dat zelf.
+      if (e.message !== 'unauthorized') {
+        // Geen verbinding: toon wat we het laatst zagen, maar wél zichtbaar
+        // gedateerd en met opslaan uit. Dat is het verschil met een service
+        // worker (valkuil 19).
+        const kopie = leesLokaal('trip');
+        if (kopie) {
+          skipNextSave.current = true;
+          setPlan(kopie.data.plan || {});
+          setCustomActivities(kopie.data.customActivities || []);
+          setLocationOverrides(kopie.data.locationOverrides || {});
+          setSuggestExclusions(kopie.data.suggestExclusions || []);
+          setTripConfig(kopie.data.tripConfig || DEFAULT_TRIP_CONFIG);
+          setServerUpdate({ at: kopie.data.updatedAt, by: kopie.data.updatedBy });
+          setOfflineOp(kopie.op);
+          firstLoad.current = false;
+        }
       }
     } finally {
       setLoading(false);
@@ -1139,6 +1162,9 @@ export default function Planner() {
   // Debounced auto-save
   useEffect(() => {
     if (loading) return;
+    // Offline: niet schrijven. We werken op een gedateerde kopie en zouden het
+    // werk van een ander overschrijven.
+    if (offlineOp) return;
     if (skipNextSave.current) {
       skipNextSave.current = false;
       return;
@@ -1167,7 +1193,7 @@ export default function Planner() {
       }
     }, 500);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [plan, customActivities, locationOverrides, tripConfig, suggestExclusions, name, loading]);
+  }, [plan, customActivities, locationOverrides, tripConfig, suggestExclusions, name, loading, offlineOp]);
 
   // Dynamische dagenlijst uit de reisconfiguratie
   const days = useMemo(() => buildDays(tripConfig), [tripConfig]);
@@ -1443,6 +1469,12 @@ export default function Planner() {
           onOpenTripSettings={() => setSheet({ type: 'trip-settings' })}
         />
         <TabBar active={activeTab} setActive={setActiveTab} />
+
+        {offlineOp && (
+          <div style={{ padding: '0 20px' }}>
+            <OfflineMelding op={offlineOp} onOpnieuw={() => fetchData(true)} />
+          </div>
+        )}
 
         {conflict && (
           <div style={{ padding: '0 20px' }}>

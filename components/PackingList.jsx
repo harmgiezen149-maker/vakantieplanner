@@ -3,6 +3,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { parseCsv } from '@/lib/csv';
 import ConflictMelding from '@/components/ConflictMelding';
+import OfflineMelding from '@/components/OfflineMelding';
+import { bewaarLokaal, leesLokaal } from '@/lib/offline';
 import {
   toggleItem as pakToggle,
   setPacked as pakSetPacked,
@@ -25,6 +27,8 @@ export default function PackingList() {
   const [saving, setSaving] = useState(false);
 
   const [conflict, setConflict] = useState(null);
+  // Laatst bewaarde versie in beeld? Dan is opslaan uit.
+  const [offlineOp, setOfflineOp] = useState(null);
   const [newCat, setNewCat] = useState('');
   const [draftItem, setDraftItem] = useState({}); // { [catId]: { label, qty } }
 
@@ -56,12 +60,17 @@ export default function PackingList() {
   // updatedAt van het document zoals wij het kennen — de versie waarop onze
   // wijziging is gebaseerd.
   const versie = useRef(null);
+  // Ref naast de state, zodat persist (een useCallback) de actuele waarde ziet.
+  const offlineOpRef = useRef(null);
 
   const load = useCallback(async () => {
     if (dirty.current) return;
     try {
       const res = await fetch('/api/inpakken');
       const data = await res.json();
+      bewaarLokaal('inpakken', data);
+      setOfflineOp(null);
+      offlineOpRef.current = null;
       setCategories(data.categories ?? []);
       setItems(data.items ?? []);
       setPersonen(data.personen ?? []);
@@ -70,7 +79,24 @@ export default function PackingList() {
       versie.current = data.updatedAt ?? null;
       latest.current = { categories: data.categories ?? [], items: data.items ?? [], personen: data.personen ?? [] };
     } catch {
-      // stil falen
+      // Geen verbinding: laat zien wat we het laatst hadden, maar met de balk
+      // erboven en opslaan uit. Zie valkuil 19 — stilzwijgend oude data die je
+      // wél kunt bewerken is precies wat we niet willen.
+      const kopie = leesLokaal('inpakken');
+      if (kopie) {
+        setCategories(kopie.data.categories ?? []);
+        setItems(kopie.data.items ?? []);
+        setPersonen(kopie.data.personen ?? []);
+        setUpdatedBy(kopie.data.updatedBy ?? null);
+        setUpdatedAt(kopie.data.updatedAt ?? null);
+        latest.current = {
+          categories: kopie.data.categories ?? [],
+          items: kopie.data.items ?? [],
+          personen: kopie.data.personen ?? [],
+        };
+        setOfflineOp(kopie.op);
+        offlineOpRef.current = kopie.op;
+      }
     } finally {
       setLoading(false);
     }
@@ -87,6 +113,8 @@ export default function PackingList() {
   // negeerVersie = "toch de mijne opslaan" na een botsing.
   const persist = useCallback((nextCats, nextItems, negeerVersie = false) => {
     latest.current = { ...latest.current, categories: nextCats, items: nextItems };
+    // Offline: wel de lokale weergave bijwerken, niet naar de server schrijven.
+    if (offlineOpRef.current) return;
     dirty.current = true;
     clearTimeout(saveTimer.current);
     setSaving(true);
@@ -437,6 +465,10 @@ export default function PackingList() {
             Maak je eigen categorieën en items aan, met aantal. De lijst is
             gedeeld — iedereen vinkt af wat ingepakt is.
           </p>
+        )}
+
+        {offlineOp && (
+          <OfflineMelding op={offlineOp} onOpnieuw={() => window.location.reload()} />
         )}
 
         {conflict && (

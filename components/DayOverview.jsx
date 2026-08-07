@@ -11,6 +11,8 @@ import {
 import { useRoute } from '@/lib/useRoute';
 import { useWeer } from '@/lib/useWeer';
 import { formatTemp } from '@/lib/weer';
+import OfflineMelding from '@/components/OfflineMelding';
+import { bewaarLokaal, leesLokaal } from '@/lib/offline';
 
 const getPin = () => {
   if (typeof window === 'undefined') return '';
@@ -231,6 +233,7 @@ export default function DayOverview() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [dayIndex, setDayIndex] = useState(null);
+  const [offlineOp, setOfflineOp] = useState(null);
 
   const days = useMemo(() => buildDays(tripConfig), [tripConfig]);
 
@@ -246,12 +249,26 @@ export default function DayOverview() {
     (async () => {
       try {
         const data = await fetchPlan();
+        bewaarLokaal('trip', data);
+        setOfflineOp(null);
         setPlan(data.plan || {});
         setCustomActivities(data.customActivities || []);
         setLocationOverrides(data.locationOverrides || {});
         if (data.tripConfig) setTripConfig(data.tripConfig);
       } catch {
-        setError('Kon de planning niet laden. Controleer je verbinding.');
+        // Deze pagina is alleen-lezen, dus de kopie tonen is hier gratis —
+        // er valt niets te overschrijven. De balk erboven blijft wel nodig:
+        // je moet weten dat je naar iets van gisteren kijkt.
+        const kopie = leesLokaal('trip');
+        if (kopie) {
+          setPlan(kopie.data.plan || {});
+          setCustomActivities(kopie.data.customActivities || []);
+          setLocationOverrides(kopie.data.locationOverrides || {});
+          if (kopie.data.tripConfig) setTripConfig(kopie.data.tripConfig);
+          setOfflineOp(kopie.op);
+        } else {
+          setError('Kon de planning niet laden. Controleer je verbinding.');
+        }
       } finally {
         setLoading(false);
       }
@@ -338,6 +355,12 @@ export default function DayOverview() {
         }}>
           <ArrowLeft size={16} /> Planner
         </Link>
+
+        {offlineOp && (
+          <div style={{ marginTop: 16 }}>
+            <OfflineMelding op={offlineOp} onOpnieuw={() => window.location.reload()} />
+          </div>
+        )}
 
         {error && (
           <div style={{

@@ -37,7 +37,7 @@ de reisgroepering in `stayLog.js`, de inpaklijst-invariant in `packing.js`, het 
 reservekopieën in `backup.js`, het uitlezen van Maps-links in `maps.js`, het samenvoegen van
 meldingen in `errorLog.js`, de versiecontrole in `conflict.js`, de cachesleutels in
 `geoCache.js`, de reisstatistiek in `reisverslag.js`, de deel-link in `delen.js`,
-het rekenwerk in `uitgaven.js`,
+het rekenwerk in `uitgaven.js`, de offline-kopie in `offline.js`,
 de CSV-import en de
 opschoning in `stayValidation.js`.
 
@@ -132,13 +132,15 @@ app/
 components/   Planner.jsx (planscherm), MapView.jsx, DayOverview.jsx,
               PackingList.jsx, Checklist.jsx, StayLog.jsx, LocationPicker.jsx,
               Beheer.jsx, BackupBeheer.jsx, FoutenLijst.jsx,
-              Poort.jsx (PinPoort + BeheerPoort), ConflictMelding.jsx, Foutmelder.jsx
+              Poort.jsx (PinPoort + BeheerPoort), ConflictMelding.jsx,
+              OfflineMelding.jsx, Foutmelder.jsx, Reisverslag.jsx, Uitgaven.jsx,
+              Bekijken.jsx, DeelLink.jsx
   planner/    de sheets van het planscherm — zie hieronder
 lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
               (Maps-links + PIN), stayLog.js, stayTypes.js, backup.js, csv.js,
               conflict.js, delen.js, errorLog.js, geoCache.js, packing.js,
               reisverslag.js, stayValidation.js, toegang.js, uitgaven.js,
-              weer.js, redis.js, useRoute.js, useWeer.js
+              weer.js, offline.js, redis.js, useRoute.js, useWeer.js
 ```
 
 `components/Planner.jsx` was één bestand van 4.100 regels en is opgesplitst: alle sheets
