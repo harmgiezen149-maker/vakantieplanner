@@ -6,7 +6,7 @@ import {
   Plus, X, Trash2, Sparkles, Calendar as CalendarIcon,
   ChevronRight, RefreshCw, User, Wifi, WifiOff, Check, AlertCircle, MapPin, Map as MapIcon,
   Pencil, Car, ChevronUp, ChevronDown, CheckSquare, Backpack,
-  Settings, CalendarRange, Compass, Star, ShieldCheck,
+  Settings, CalendarRange, Compass, Star, ShieldCheck, Wallet,
 } from 'lucide-react';
 import {
   COLORS, CATEGORIES, CATEGORY_ORDER, DEFAULT_ACTIVITIES,
@@ -148,6 +148,7 @@ const Header = ({ tripConfig, stays, totalDays, stats, name, onNameChange, syncS
             { href: '/checklist', icon: <CheckSquare size={18} />, label: 'Auto & documenten' },
             { href: '/inpakken', icon: <Backpack size={18} />, label: 'Inpaklijst' },
             { href: '/verblijven', icon: <Star size={18} />, label: 'Verblijven' },
+            { href: '/uitgaven', icon: <Wallet size={18} />, label: 'Uitgaven' },
           ].map((b) => (
             <Link
               key={b.href}

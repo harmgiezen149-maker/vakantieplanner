@@ -92,8 +92,21 @@ test('rommel wordt geweigerd met uitleg', () => {
   );
 });
 
-test('alle vier de documenten zitten in de reservekopie', () => {
+test('de reservekopie bevat precies de documenten die het waard zijn', () => {
+  // Bewust een vaste lijst: een nieuw Redis-document valt buiten de nachtelijke
+  // kopie tot iemand hem hier toevoegt, en dan wil je dat die persoon er even
+  // over nadenkt in plaats van dat het stilzwijgend goed of fout gaat.
   assert.deepEqual(BACKUP_KEYS, [
-    'planner:trip', 'planner:inpakken', 'planner:checklist', 'planner:verblijven',
+    'planner:trip', 'planner:inpakken', 'planner:checklist',
+    'planner:verblijven', 'planner:uitgaven',
   ]);
+});
+
+test('afgeleide en vluchtige documenten blijven er bewust buiten', () => {
+  // planner:fouten is een logboek van storingen, planner:delen een token dat je
+  // opnieuw kunt aanmaken, en cache:* is per definitie weggooibaar.
+  for (const key of ['planner:fouten', 'planner:delen']) {
+    assert.equal(BACKUP_KEYS.includes(key), false, `${key} hoort niet in de kopie`);
+  }
+  assert.equal(BACKUP_KEYS.some(k => k.startsWith('cache:')), false);
 });

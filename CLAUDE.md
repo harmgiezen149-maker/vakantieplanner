@@ -37,6 +37,7 @@ de reisgroepering in `stayLog.js`, de inpaklijst-invariant in `packing.js`, het 
 reservekopieën in `backup.js`, het uitlezen van Maps-links in `maps.js`, het samenvoegen van
 meldingen in `errorLog.js`, de versiecontrole in `conflict.js`, de cachesleutels in
 `geoCache.js`, de reisstatistiek in `reisverslag.js`, de deel-link in `delen.js`,
+het rekenwerk in `uitgaven.js`,
 de CSV-import en de
 opschoning in `stayValidation.js`.
 
@@ -102,6 +103,7 @@ app/
   verblijven/page.jsx     → StayLog        (logboek: kaart, cijfer, review, foto's)
   verslag/page.jsx        → Reisverslag    (terugblik: nachten, landen, cijfers)
   bekijk/page.jsx         → Bekijken       (alleen-lezen deel-link, zonder PIN)
+  uitgaven/page.jsx       → Uitgaven       (kasboek: per categorie en per persoon)
   beheer/page.jsx         → Beheer         (kopieën, fouten, opruimen — eigen wachtwoord)
   reservekopie/, fouten/  → sturen door naar /beheer (oude bladwijzers)
   layout.jsx, manifest.js, icon.svg, globals.css   (PWA + huisstijl)
@@ -125,6 +127,7 @@ app/
     verblijven/foto/      foto verwijderen uit Blob (DELETE)
     delen/      GET/POST/DELETE  deel-link beheren (beheer-gated)
     delen/bekijk/ GET     de uitgeklede planning achter een token (open!)
+    uitgaven/   GET/POST  kasboek van de reis
 components/   Planner.jsx (planscherm), MapView.jsx, DayOverview.jsx,
               PackingList.jsx, Checklist.jsx, StayLog.jsx, LocationPicker.jsx,
               Beheer.jsx, BackupBeheer.jsx, FoutenLijst.jsx,
@@ -133,7 +136,8 @@ components/   Planner.jsx (planscherm), MapView.jsx, DayOverview.jsx,
 lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
               (Maps-links + PIN), stayLog.js, stayTypes.js, backup.js, csv.js,
               conflict.js, delen.js, errorLog.js, geoCache.js, packing.js,
-              reisverslag.js, stayValidation.js, toegang.js, redis.js, useRoute.js
+              reisverslag.js, stayValidation.js, toegang.js, uitgaven.js,
+              redis.js, useRoute.js
 ```
 
 `components/Planner.jsx` was één bestand van 4.100 regels en is opgesplitst: alle sheets
@@ -170,7 +174,7 @@ Twee dingen om te weten:
 
 ## Datamodel
 
-Zes losse Redis-documenten, elk één JSON-blob:
+Zeven losse Redis-documenten, elk één JSON-blob:
 
 | Key | Vorm |
 | --- | --- |
@@ -179,6 +183,7 @@ Zes losse Redis-documenten, elk één JSON-blob:
 | `planner:checklist` | `{ checked:{}, updatedBy, updatedAt }` |
 | `planner:verblijven` | `{ stays:[{id,name,locationLabel,coords,type,typeOther,country,countryCode,startDate,endDate,periodLabel,tripTitle,score,review,photos,source}], updatedBy, updatedAt }` |
 | `planner:fouten` | `{ fouten:[{bron,bericht,detail,pad,versie,aantal,eerst,laatst}], updatedAt }` — max 100 |
+| `planner:uitgaven` | `{ uitgaven:[{id,datum,bedrag,omschrijving,categorie,betaaldDoor,activityId}], personen:[naam], updatedBy, updatedAt }` |
 | `planner:delen` | `{ token, actief, aangemaakt, aangemaaktDoor, ingetrokken? }` — één link tegelijk |
 
 Daarnaast staan er `cache:v1:*`-sleutels in dezelfde Redis. Die horen niet bij het
@@ -347,6 +352,15 @@ Houd die vorm zo. Wat er bewust níét in zit: `updatedBy` (namen van het gezin)
 staan. `/bekijk` heeft geen `PinPoort` en geen enkele knop die schrijft — er staat ook geen
 opslagcode in `components/Bekijken.jsx`, en dat is makkelijker te bewaken dan een
 alleen-lezen stand van `Planner`.
+
+**10c. Geld staat in hele centen, als integer.**
+`lib/uitgaven.js` rekent nergens met euro's als kommagetal, want `0.1 + 0.2` is
+`0.30000000000000004` en dat wil je niet in een kasboek. `naarCenten()` zet de invoer om
+(komma én punt, met of zonder euroteken) en geeft **`null`** bij onleesbare invoer — niet
+`0`, anders sluipt er stilzwijgend een uitgave van niets in de lijst. `verdeel()` heeft
+één eigenschap die er echt toe doet: de som van de delen is exact het oorspronkelijke
+bedrag, dus de restcent gaat naar de eerste personen in plaats van te verdampen. Er is
+een test die dat voor elk bedrag van 0 t/m 200 cent over 1 t/m 7 personen nagaat.
 
 **11. `export const dynamic = 'force-dynamic'` op elke API route.**
 Zonder dat cachet Vercel de GET en krijg je na opslaan een oude versie terug. Ook op

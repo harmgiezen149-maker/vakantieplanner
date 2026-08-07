@@ -122,7 +122,8 @@ const S = {
   tab: {
     display: 'inline-flex', alignItems: 'center', gap: 6,
     padding: '9px 14px', borderRadius: 999,
-    border: `1px solid ${COLORS.hairline}`, background: 'transparent',
+    borderWidth: 1, borderStyle: 'solid', borderColor: COLORS.hairline,
+    background: 'transparent',
     color: COLORS.ink, fontFamily: "'DM Sans', sans-serif",
     fontSize: 13, fontWeight: 500, cursor: 'pointer',
   },
