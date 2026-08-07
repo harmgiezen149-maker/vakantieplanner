@@ -14,6 +14,8 @@ import {
   getMapsLink, applyLocationOverride, formatDistance, formatDuration,
 } from '@/lib/data';
 import { useRoute } from '@/lib/useRoute';
+import { useWeer } from '@/lib/useWeer';
+import { formatTemp } from '@/lib/weer';
 import { getPin } from '@/lib/maps';
 import { archiveTripStays } from '@/lib/stayLog';
 import ConflictMelding from '@/components/ConflictMelding';
@@ -517,7 +519,7 @@ const chipEditInput = {
 
 // ============ DAY CARD ============
 
-const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay, onSwapDay }) => {
+const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, weer, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay, onSwapDay }) => {
   const [swapping, setSwapping] = useState(false);
   const hasActivities = activities.length > 0;
   const stay = day.stay;
@@ -564,6 +566,15 @@ const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, 
           fontFamily: "'Fraunces', serif", fontSize: 22,
           color: COLORS.forest, fontWeight: 500, letterSpacing: '-0.01em',
         }}>{day.date}</div>
+        {weer && (
+          <span
+            title={`${weer.label}, ${formatTemp(weer.maxC)} / ${formatTemp(weer.minC)}`}
+            style={{ fontSize: 12, color: COLORS.inkLight, display: 'inline-flex', alignItems: 'center', gap: 3 }}
+          >
+            <span style={{ fontSize: 14 }}>{weer.emoji}</span>
+            <span style={{ fontWeight: 600, color: COLORS.ink }}>{formatTemp(weer.maxC)}</span>
+          </span>
+        )}
         {stay && (
           <div style={{
             fontSize: 9, color: stay.color, letterSpacing: 0.8,
@@ -734,7 +745,7 @@ const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, 
 
 // ============ PLAN VIEW ============
 
-const PlanView = ({ days, plan, activityById, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay, onSwapDay, onOpenTripSettings }) => {
+const PlanView = ({ days, plan, activityById, weerPerDag, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay, onSwapDay, onOpenTripSettings }) => {
   if (days.length === 0) {
     return (
       <div style={{ padding: '40px 20px 100px', textAlign: 'center' }}>
@@ -769,6 +780,7 @@ const PlanView = ({ days, plan, activityById, onAddClick, onRemove, onEditLocati
           activities={plan[day.key] || []}
           activityById={activityById}
           plan={plan}
+          weer={weerPerDag?.[day.key]}
           onAddClick={onAddClick}
           onRemove={onRemove}
           onEditLocation={onEditLocation}
@@ -1159,6 +1171,15 @@ export default function Planner() {
 
   // Dynamische dagenlijst uit de reisconfiguratie
   const days = useMemo(() => buildDays(tripConfig), [tripConfig]);
+
+  // Eén weeroproep voor de hele reis, op het eerste verblijf met coördinaten.
+  // Mislukt hij, dan blijft de map leeg en tonen de dagkaarten er niets over —
+  // het weer is bijzaak en mag de planner niet in de weg zitten.
+  const weerCoords = useMemo(() => {
+    const metCoords = (tripConfig?.stays || []).find(s => Array.isArray(s.coords));
+    return metCoords?.coords || null;
+  }, [tripConfig]);
+  const weerPerDag = useWeer(weerCoords, days[0]?.key, days[days.length - 1]?.key);
   const stays = useMemo(() => staysWithColors(tripConfig), [tripConfig]);
 
   const allActivities = useMemo(
@@ -1455,6 +1476,7 @@ export default function Planner() {
             days={days}
             plan={plan}
             activityById={activityById}
+            weerPerDag={weerPerDag}
             onAddClick={(dayKey) => setSheet({ type: 'pick-activity', dayKey })}
             onRemove={removeFromDay}
             onEditLocation={(act) => setSheet({ type: 'edit-location', activityId: act.id })}

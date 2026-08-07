@@ -111,3 +111,17 @@ test('de bewaartermijnen staan in de goede verhouding', () => {
   assert.ok(TTL.suggest > TTL.whatsHere);
   assert.ok(Object.values(TTL).every(t => t > 0 && Number.isInteger(t)));
 });
+
+test('het weer wordt maar kort bewaard', () => {
+  // Een verwachting van vorige week is erger dan geen verwachting
+  assert.ok(TTL.weer <= 3600, 'hooguit een uur');
+  assert.ok(TTL.weer < TTL.whatsHere / 24, 'ruim korter dan al het andere');
+});
+
+test('een andere datumreeks geeft een andere weersleutel', () => {
+  assert.notEqual(
+    cacheSleutel('weer', [48.07, 6.88, '2026-08-10', '2026-08-14']),
+    cacheSleutel('weer', [48.07, 6.88, '2026-08-11', '2026-08-15']),
+    'anders krijg je de verwachting van een andere week te zien',
+  );
+});

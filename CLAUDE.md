@@ -128,6 +128,7 @@ app/
     delen/      GET/POST/DELETE  deel-link beheren (beheer-gated)
     delen/bekijk/ GET     de uitgeklede planning achter een token (open!)
     uitgaven/   GET/POST  kasboek van de reis
+    weer/       GET       weersverwachting per dag (Open-Meteo, geen sleutel)
 components/   Planner.jsx (planscherm), MapView.jsx, DayOverview.jsx,
               PackingList.jsx, Checklist.jsx, StayLog.jsx, LocationPicker.jsx,
               Beheer.jsx, BackupBeheer.jsx, FoutenLijst.jsx,
@@ -137,7 +138,7 @@ lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
               (Maps-links + PIN), stayLog.js, stayTypes.js, backup.js, csv.js,
               conflict.js, delen.js, errorLog.js, geoCache.js, packing.js,
               reisverslag.js, stayValidation.js, toegang.js, uitgaven.js,
-              redis.js, useRoute.js
+              weer.js, redis.js, useRoute.js, useWeer.js
 ```
 
 `components/Planner.jsx` was één bestand van 4.100 regels en is opgesplitst: alle sheets

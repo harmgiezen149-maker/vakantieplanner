@@ -9,6 +9,8 @@ import {
   getMapsLink, applyLocationOverride, formatDistance, formatDuration,
 } from '@/lib/data';
 import { useRoute } from '@/lib/useRoute';
+import { useWeer } from '@/lib/useWeer';
+import { formatTemp } from '@/lib/weer';
 
 const getPin = () => {
   if (typeof window === 'undefined') return '';
@@ -232,6 +234,14 @@ export default function DayOverview() {
 
   const days = useMemo(() => buildDays(tripConfig), [tripConfig]);
 
+  // Eén oproep voor de hele reis: de verwachting per dag komt uit dezelfde
+  // lijst, en dat scheelt een verzoek per keer dat je een dag verder klikt.
+  const weerCoords = useMemo(() => {
+    const metCoords = (tripConfig?.stays || []).find(s => Array.isArray(s.coords));
+    return metCoords?.coords || null;
+  }, [tripConfig]);
+  const weerPerDag = useWeer(weerCoords, days[0]?.key, days[days.length - 1]?.key);
+
   useEffect(() => {
     (async () => {
       try {
@@ -383,6 +393,27 @@ export default function DayOverview() {
                   {day.endStay && day.endStay.id !== day.stay?.id ? ` → ${day.endStay.name}` : ''}
                   {' · '}dag {dayIndex + 1} van {days.length}
                 </div>
+                {weerPerDag[day.key] && (
+                  <div
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      marginTop: 6, padding: '3px 10px', borderRadius: 999,
+                      background: COLORS.creamSoft,
+                      border: `1px solid ${COLORS.hairline}`,
+                      fontSize: 12, color: COLORS.ink,
+                    }}
+                    title={weerPerDag[day.key].label}
+                  >
+                    <span style={{ fontSize: 14 }}>{weerPerDag[day.key].emoji}</span>
+                    <span style={{ fontWeight: 600 }}>{formatTemp(weerPerDag[day.key].maxC)}</span>
+                    <span style={{ color: COLORS.inkLight }}>{formatTemp(weerPerDag[day.key].minC)}</span>
+                    {weerPerDag[day.key].neerslagMm > 0 && (
+                      <span style={{ color: COLORS.lake }}>
+                        {Math.round(weerPerDag[day.key].neerslagMm)} mm
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
               <button
