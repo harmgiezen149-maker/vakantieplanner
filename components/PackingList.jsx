@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { parseCsv } from '@/lib/csv';
 
 // Unieke id-generator (geen externe dependency nodig)
 const uid = () =>
@@ -165,7 +166,7 @@ export default function PackingList() {
   };
 
   // ── Item-acties ────────────────────────────────────────────────────
-  // ── Excel-import ──────────────────────────────────────────────────
+  // ── CSV-import ────────────────────────────────────────────────────
   const importInputRef = useRef(null);
   const [importing, setImporting] = useState(false);
 
@@ -173,11 +174,7 @@ export default function PackingList() {
     if (!file) return;
     setImporting(true);
     try {
-      const XLSX = await import('xlsx');
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: 'array' });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      const rows = parseCsv(await file.text());
 
       // Kolomherkenning: zoek een kopregel met herkenbare woorden.
       // Zonder kopregel: kolom A = categorie, B = item, C = aantal.
@@ -203,7 +200,7 @@ export default function PackingList() {
       }
 
       // Rijen verwerken. Lege categoriecel = vorige categorie (zoals bij
-      // samengevoegde cellen in Excel). Geen categorie = "Algemeen".
+      // samengevoegde cellen in een spreadsheet). Geen categorie = "Algemeen".
       const parsed = []; // { catName, label, qty }
       let lastCat = '';
       for (let r = startRow; r < rows.length; r++) {
@@ -218,7 +215,7 @@ export default function PackingList() {
       }
 
       if (parsed.length === 0) {
-        window.alert('Geen items gevonden in dit bestand. Verwacht formaat: kolommen Categorie | Item | Aantal (kopregel optioneel).');
+        window.alert('Geen items gevonden in dit CSV-bestand. Verwacht formaat: kolommen Categorie | Item | Aantal (kopregel optioneel), gescheiden door een puntkomma of komma.');
         return;
       }
 
@@ -388,7 +385,7 @@ export default function PackingList() {
           <input
             ref={importInputRef}
             type="file"
-            accept=".xlsx,.xls,.csv"
+            accept=".csv,text/csv"
             style={{ display: 'none' }}
             onChange={(e) => handleImportFile(e.target.files?.[0])}
           />
@@ -397,7 +394,7 @@ export default function PackingList() {
             disabled={importing}
             style={{ ...S.resetBtn, marginBottom: 0, opacity: importing ? 0.6 : 1 }}
           >
-            {importing ? 'Bezig met lezen…' : '📥 Importeren uit Excel'}
+            {importing ? 'Bezig met lezen…' : '📥 Importeren uit CSV'}
           </button>
           {done > 0 && (
             <button
@@ -412,6 +409,14 @@ export default function PackingList() {
             </button>
           )}
         </div>
+
+        {!soloCategory && (
+          <p style={S.importHint}>
+            Kolommen <strong>Categorie · Item · Aantal</strong>, kopregel mag.
+            In Excel of Numbers: <em>Opslaan als → CSV</em>. Puntkomma en komma
+            worden allebei herkend.
+          </p>
+        )}
 
         <div style={S.progressWrap}>
           <div style={S.progressTrack}>
@@ -789,6 +794,7 @@ const S = {
     background: 'transparent', color: teal,
     border: `1px solid ${teal}`, borderRadius: 999, cursor: 'pointer',
   },
+  importHint: { fontSize: 12, lineHeight: 1.5, color: '#8a8478', margin: '-8px 0 16px' },
   progressWrap: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 },
   progressTrack: { flex: 1, height: 10, background: tealSoft, borderRadius: 999, overflow: 'hidden' },
   progressFill: { height: '100%', background: teal, borderRadius: 999, transition: 'width 0.35s ease' },

@@ -15,9 +15,8 @@
     "@vercel/blob": "^2.6.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.460.0",
-    "next": "^15.0.3",
+    "next": "^15.5.23",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "xlsx": "^0.18.5"
+    "react-dom": "^19.0.0"
   }
 }

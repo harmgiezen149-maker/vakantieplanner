@@ -101,7 +101,8 @@ app/
 components/   Planner.jsx (~4000 r.), MapView.jsx, DayOverview.jsx,
               PackingList.jsx, Checklist.jsx, StayLog.jsx, LocationPicker.jsx
 lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
-              (Maps-links + PIN), stayLog.js, stayTypes.js, redis.js, useRoute.js
+              (Maps-links + PIN), stayLog.js, stayTypes.js, backup.js, csv.js,
+              redis.js, useRoute.js
 ```
 
 `components/Planner.jsx` is bewust één groot bestand: alle sheets (`PickDaySheet`,
@@ -256,7 +257,17 @@ die volgorde niet: het verschil tussen een reservekopie en een val is precies da
 De cron draait op `/api/backup/run` en niet op `/api/backup`, omdat een Vercel-cron altijd
 een GET doet en het maken van een kopie een POST is.
 
-**17. Bewust géén service worker.**
+**17. Afhankelijkheden bewust minimaal — en waarom er nog meldingen staan.**
+`xlsx` is eruit gehaald (prototype pollution + ReDoS, geen fix beschikbaar) en vervangen
+door `lib/csv.js`. Voeg hem niet terug: de import hoeft alleen kolommen te lezen.
+`npm audit` meldt nog drie zaken via Next: `postcss` en `sharp`. Beide zijn hier **niet
+bereikbaar** — `next/image` wordt nergens gebruikt (sharp is een optionele dependency die
+alleen dáárvoor draait) en postcss verwerkt tijdens de build alleen onze eigen
+`globals.css`. De enige "fix" die npm voorstelt is Next 16, een hoofdversie; dat is die
+migratie niet waard. Controleer die aanname wel opnieuw zodra `next/image` wél in gebruik
+komt.
+
+**18. Bewust géén service worker.**
 De PWA is manifest + iconen, meer niet. Voeg er geen offline-caching aan toe zonder dat
 expliciet te bespreken: gecachete JS naast een gedeeld Redis-document geeft precies de
 "waarom zie ik oude data"-klasse bugs die punt 4 probeert te vermijden.
