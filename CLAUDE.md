@@ -107,6 +107,7 @@ app/
     hiking/     POST      wandelroutes uit OSM-relaties
     resolve-maps/ POST    Google Maps-link → naam + coördinaten
     whats-here/ GET/POST  POI's rond een aangeklikt kaartpunt
+    fouten/     GET/POST/DELETE  foutenlogboek (melden mag zonder PIN)
     backup/     GET/POST  reservekopieën: lijst / nieuwe maken
     backup/run/ GET       adres van de dagelijkse Vercel-cron
     backup/download/      alles als JSON downloaden (werkt zonder Blob)
@@ -137,6 +138,7 @@ Drie losse Redis-documenten, elk één JSON-blob:
 | `planner:inpakken` | `{ categories:[{id,name}], items:[{id,categoryId,label,qty,checked,packed,important,note}], updatedBy, updatedAt }` |
 | `planner:checklist` | `{ checked:{}, updatedBy, updatedAt }` |
 | `planner:verblijven` | `{ stays:[{id,name,locationLabel,coords,type,typeOther,country,countryCode,startDate,endDate,periodLabel,tripTitle,score,review,photos,source}], updatedBy, updatedAt }` |
+| `planner:fouten` | `{ fouten:[{bron,bericht,detail,pad,versie,aantal,eerst,laatst}], updatedAt }` — max 100 |
 
 De eerste drie lezen eenmalig een **legacy key** (`vosges:family-plan`,
 `vogezen2026:*`) als de nieuwe leeg is. Niet weghalen — dat is de migratie van de oude
@@ -283,7 +285,18 @@ alleen dáárvoor draait) en postcss verwerkt tijdens de build alleen onze eigen
 migratie niet waard. Controleer die aanname wel opnieuw zodra `next/image` wél in gebruik
 komt.
 
-**18. Bewust géén service worker.**
+**18. Het foutenlogboek mag de app nooit raken.**
+`components/Foutmelder.jsx` hangt in de root-layout en meldt browserfouten aan
+`/api/fouten`. Drie regels die je niet moet verzwakken: melden mag **zonder PIN** (een fout
+treedt soms op vóórdat iemand is ingelogd), het melden zelf staat in een `try` die stil
+faalt (een kapot logboek mag de app niet omver halen), en er zit een plafond op —
+10 meldingen per paginasessie, 30 per minuut per serverinstantie, 100 regels in het
+document. Zonder die plafonds vult één pagina die in een lus faalt het hele document.
+Dezelfde fout op dezelfde plek wordt één regel met een teller. Voeg je een nieuwe
+API-route toe met een stil faalpad, roep dan `meldServerFout()` aan — dat is precies waarom
+de nachtelijke reservekopie en het uitlezen van Maps-links het nu doen.
+
+**19. Bewust géén service worker.**
 De PWA is manifest + iconen, meer niet. Voeg er geen offline-caching aan toe zonder dat
 expliciet te bespreken: gecachete JS naast een gedeeld Redis-document geeft precies de
 "waarom zie ik oude data"-klasse bugs die punt 4 probeert te vermijden.

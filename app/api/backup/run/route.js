@@ -1,4 +1,5 @@
 import { voerBackupUit } from '../route';
+import { meldServerFout } from '@/app/api/fouten/route';
 
 // Het adres dat de dagelijkse Vercel-cron aanroept (zie vercel.json).
 // Crons doen altijd een GET, daarom staat dit los van de POST op /api/backup.
@@ -23,5 +24,17 @@ export async function GET(request) {
     }
   }
 
-  return voerBackupUit();
+  // Een nachtelijke taak die stil faalt is erger dan geen back-up: je denkt
+  // dat je beschermd bent. Daarom belandt een mislukking in het foutenlogboek.
+  const res = await voerBackupUit();
+  if (!res.ok) {
+    let detail = null;
+    try { detail = JSON.stringify(await res.clone().json()); } catch { /* laat leeg */ }
+    await meldServerFout(
+      `Nachtelijke reservekopie mislukt (status ${res.status})`,
+      detail,
+      '/api/backup/run',
+    );
+  }
+  return res;
 }

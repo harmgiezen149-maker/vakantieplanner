@@ -1,3 +1,5 @@
+import { meldServerFout } from '@/app/api/fouten/route';
+
 // Lost Google Maps-links op naar naam + coördinaten.
 // Korte links (maps.app.goo.gl) vereisen het volgen van de redirect —
 // dat kan niet vanuit de browser (CORS), dus dat doen we hier server-side.
@@ -218,6 +220,14 @@ export async function POST(request) {
   }
 
   if (!coords) {
+    // Dit is het pad dat eerder stilletjes stukging: de gebruiker zag alleen
+    // "kon de link niet uitlezen". Nu staat in het foutenlogboek waar de keten
+    // strandde, zonder dat iemand het hoeft te melden.
+    await meldServerFout(
+      'Maps-link niet uit te lezen',
+      `hops=${bezocht.length} status=${laatste?.status ?? '-'} eind=${finalUrl}`,
+      '/api/resolve-maps',
+    );
     // finalUrl meesturen: dan kan de gebruiker hem alsnog met de hand plakken,
     // en zie je in één oogopslag waar de keten strandde.
     return Response.json({

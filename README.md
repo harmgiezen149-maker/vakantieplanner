@@ -11,6 +11,7 @@ Gebouwd met **Next.js 15** + **Upstash Redis** voor Vercel deployment.
 - 🗺️ Kaartweergave (Leaflet) met verblijf-markers, activiteit-markers, filter per verblijf of per dag, en dagroutes met afstand/rijtijd
 - 🎯 Kleine set generieke startactiviteiten (zwemmen, wandelen, markt, BBQ…) + onbeperkt eigen activiteiten met locatie
 - ✅ Auto & documenten-checklist en 🎒 inpaklijst — beide gedeeld, met **"Alle vinkjes resetten"** zodat je lijsten herbruikt bij de volgende vakantie
+- 🔎 **Foutenlogboek** (`/fouten`): gaat er in de app iets mis — in de browser van wie hem gebruikt of op de server — dan komt dat hier terecht, met een teller per fout. Zo zie je een storing zonder dat iemand het hoeft te melden
 - 🛟 **Automatische reservekopieën** (`/reservekopie`): elke nacht wordt alles naar Vercel Blob weggeschreven — 30 dagen aan dagelijkse kopieën plus één per maand tot een jaar terug. Je kunt er een terugzetten (de huidige staat wordt dan eerst veiliggesteld) of alles als JSON downloaden
 - ⭐ **Verblijvenlogboek** (`/verblijven`): alle plekken waar je hebt gelogeerd op één kaart, met bezoekdatum, soort verblijf (camping met tent/caravan/camper/stacaravan, hotel, B&B, Airbnb of anders), foto's, korte review en een cijfer van 1 tot 10. Het land wordt automatisch uit de locatie afgeleid. Zoeken kan op land, soort en minimumcijfer — de kaart filtert mee. Je haalt de huidige reis met één knop binnen, en oude vakanties voeg je met de hand toe
 - 🔄 **"Nieuwe vakantie starten"**: wist planning en reisgegevens, maar laat checklist- en inpaklijst-items staan
@@ -137,6 +138,7 @@ Open [http://localhost:3000](http://localhost:3000).
   - `PUT /api/plan` — overschrijft de hele staat (incl. tripConfig)
   - `GET/POST /api/checklist` en `/api/inpakken` — gedeelde lijsten
   - `GET/POST /api/verblijven` — het verblijvenlogboek
+  - `GET/POST/DELETE /api/fouten` — foutenlogboek lezen, melden en wissen
   - `GET/POST /api/backup` — reservekopieën opvragen en maken
   - `GET /api/backup/download` — alles als JSON downloaden (werkt ook zonder Blob)
   - `POST /api/backup/restore` — een momentopname terugzetten

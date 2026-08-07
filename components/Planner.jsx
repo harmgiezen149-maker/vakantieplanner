@@ -3475,6 +3475,27 @@ const SettingsSheet = ({ onClose, onOpenTripSettings, onClearPlan, onNewVacation
         </div>
       </Link>
 
+      <Link
+        href="/fouten"
+        style={{
+          padding: '14px 16px', background: COLORS.creamSoft,
+          border: `1px solid ${COLORS.hairline}`, borderRadius: 12,
+          textAlign: 'left', cursor: 'pointer', textDecoration: 'none',
+          display: 'block',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+          <AlertCircle size={16} color={COLORS.slate} />
+          <span style={{ fontWeight: 600, color: COLORS.forest, fontSize: 14 }}>
+            Wat er misging
+          </span>
+        </div>
+        <div style={{ fontSize: 12, color: COLORS.ink, lineHeight: 1.5 }}>
+          Fouten die in de app optreden komen hier terecht, zodat je ze ziet
+          zonder dat iemand het hoeft te melden.
+        </div>
+      </Link>
+
       <button
         onClick={onOpenTripSettings}
         style={{
