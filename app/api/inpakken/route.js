@@ -12,16 +12,23 @@ const LEGACY_KEY = 'vogezen2026:inpakken';
 // De volledige staat is één document:
 // {
 //   categories: [{ id, name }],
-//   items: [{ id, categoryId, label, qty, checked, important?, note? }],
+//   personen: [naam],
+//   items: [{ id, categoryId, label, qty, checked, important?, note?, person? }],
 //   updatedBy, updatedAt
 // }
-const EMPTY = { categories: [], items: [], updatedBy: null, updatedAt: null };
+//
+// `person` is optioneel en `null` betekent "gaat voor iedereen mee" — dat is
+// precies wat een bestaande lijst zonder personen doet, dus die verandert niet.
+const EMPTY = { categories: [], personen: [], items: [], updatedBy: null, updatedAt: null };
 
 export async function GET() {
   try {
     let data = await redis.get(KEY);
     if (!data) data = await redis.get(LEGACY_KEY);
-    return Response.json(data ?? EMPTY);
+    // Een lijst van vóór de personen-uitbreiding heeft het veld niet; vul het
+    // aan zodat de client niet op undefined hoeft te controleren.
+    if (!data) return Response.json(EMPTY);
+    return Response.json({ ...EMPTY, ...data, personen: data.personen || [] });
   } catch (err) {
     return Response.json({ error: 'load_failed' }, { status: 500 });
   }
@@ -37,8 +44,14 @@ export async function POST(request) {
       return Response.json(conflictAntwoord(bestaand), { status: CONFLICT_STATUS });
     }
 
+    const personen = (Array.isArray(body.personen) ? body.personen : [])
+      .slice(0, 12)
+      .map(p => (typeof p === 'string' ? p.trim().slice(0, 40) : null))
+      .filter(Boolean);
+
     const payload = {
       categories: Array.isArray(body.categories) ? body.categories : [],
+      personen,
       items: Array.isArray(body.items) ? body.items : [],
       updatedBy: body.updatedBy ?? null,
       updatedAt: new Date().toISOString(),

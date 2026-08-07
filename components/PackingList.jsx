@@ -16,6 +16,8 @@ const uid = () =>
 export default function PackingList() {
   const [categories, setCategories] = useState([]);
   const [items, setItems] = useState([]);
+  // Wie er meegaan. Leeg = de lijst is voor iedereen samen, zoals voorheen.
+  const [personen, setPersonen] = useState([]);
   const [updatedBy, setUpdatedBy] = useState(null);
   const [updatedAt, setUpdatedAt] = useState(null);
   const [name, setName] = useState('');
@@ -32,11 +34,16 @@ export default function PackingList() {
 
   // Persoonlijke pagina: /inpakken?cat=<id> toont één categorie
   const [soloCat, setSoloCat] = useState(null);
+  // Persoonlijke weergave: /inpakken?persoon=<naam>
+  const [soloPersoon, setSoloPersoon] = useState(null);
+  // Filterbalk: welke personen tonen (leeg = allemaal)
+  const [persoonFilter, setPersoonFilter] = useState([]);
   // Welk item heeft zijn bewerk-/notitiepaneel open
   const [expandedItem, setExpandedItem] = useState(null);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setSoloCat(params.get('cat'));
+    setSoloPersoon(params.get('persoon'));
   }, []);
 
   const saveTimer = useRef(null);
@@ -57,10 +64,11 @@ export default function PackingList() {
       const data = await res.json();
       setCategories(data.categories ?? []);
       setItems(data.items ?? []);
+      setPersonen(data.personen ?? []);
       setUpdatedBy(data.updatedBy ?? null);
       setUpdatedAt(data.updatedAt ?? null);
       versie.current = data.updatedAt ?? null;
-      latest.current = { categories: data.categories ?? [], items: data.items ?? [] };
+      latest.current = { categories: data.categories ?? [], items: data.items ?? [], personen: data.personen ?? [] };
     } catch {
       // stil falen
     } finally {
@@ -78,7 +86,7 @@ export default function PackingList() {
   // Centrale opslag: debounced, gebruikt altijd de meest recente ref-waarden.
   // negeerVersie = "toch de mijne opslaan" na een botsing.
   const persist = useCallback((nextCats, nextItems, negeerVersie = false) => {
-    latest.current = { categories: nextCats, items: nextItems };
+    latest.current = { ...latest.current, categories: nextCats, items: nextItems };
     dirty.current = true;
     clearTimeout(saveTimer.current);
     setSaving(true);
@@ -90,6 +98,7 @@ export default function PackingList() {
           body: JSON.stringify({
             categories: latest.current.categories,
             items: latest.current.items,
+            personen: latest.current.personen ?? [],
             updatedBy: name || null,
             basisVersie: negeerVersie ? undefined : versie.current,
           }),
@@ -118,6 +127,34 @@ export default function PackingList() {
     setCategories(nextCats);
     setItems(nextItems);
     persist(nextCats, nextItems);
+  };
+
+  // Personen aanpassen loopt langs dezelfde opslag; latest.current is de bron
+  // van waarheid, niet de state uit de closure.
+  const applyPersonen = (next) => {
+    setPersonen(next);
+    latest.current = { ...latest.current, personen: next };
+    persist(latest.current.categories, latest.current.items);
+  };
+
+  const addPersoon = (naam) => {
+    const schoon = String(naam || '').trim().slice(0, 40);
+    if (!schoon || personen.includes(schoon)) return;
+    applyPersonen([...personen, schoon]);
+  };
+
+  // Iemand weghalen laat zijn items staan, maar zet ze terug op "voor iedereen".
+  // Ze stilletjes verwijderen zou spullen uit de lijst laten verdwijnen.
+  const removePersoon = (naam) => {
+    const nextItems = items.map((it) => (it.person === naam ? { ...it, person: null } : it));
+    setPersonen(personen.filter((p) => p !== naam));
+    setItems(nextItems);
+    latest.current = { ...latest.current, personen: personen.filter((p) => p !== naam), items: nextItems };
+    persist(latest.current.categories, nextItems);
+  };
+
+  const setItemPersoon = (itemId, naam) => {
+    apply(categories, items.map((it) => (it.id === itemId ? { ...it, person: naam || null } : it)));
   };
 
   // ── Categorie-acties ───────────────────────────────────────────────
@@ -356,6 +393,15 @@ export default function PackingList() {
   const soloItems = soloCategory ? items.filter((it) => it.categoryId === soloCategory.id) : null;
   const soloDone = soloItems ? soloItems.filter((it) => it.checked).length : 0;
 
+  // Eén regel die bepaalt of een item in beeld hoort. `person === null` =
+  // "gaat voor iedereen mee" en is dus altijd zichtbaar, ook in een
+  // persoonlijke weergave — anders zou de tandpasta uit ieders lijst vallen.
+  const zichtbaarVoorPersoon = (it) => {
+    if (soloPersoon) return !it.person || it.person === soloPersoon;
+    if (persoonFilter.length === 0) return true;
+    return !it.person || persoonFilter.includes(it.person);
+  };
+
   const formattedDate = updatedAt
     ? new Date(updatedAt).toLocaleString('nl-NL', {
         day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
@@ -368,9 +414,19 @@ export default function PackingList() {
 
       <header style={S.header}>
         <a href="/" style={S.backLink}>‹ Terug naar planner</a>
-        <p style={S.kicker}>{soloCategory ? 'Vakantie · Persoonlijke inpaklijst' : 'Vakantie · Inpakken'}</p>
-        <h1 style={S.title}>{soloCategory ? soloCategory.name : 'Wat gaat er mee'}</h1>
-        {soloCategory ? (
+        <p style={S.kicker}>
+          {soloPersoon ? 'Vakantie · Persoonlijke lijst' : soloCategory ? 'Vakantie · Persoonlijke inpaklijst' : 'Vakantie · Inpakken'}
+        </p>
+        <h1 style={S.title}>
+          {soloPersoon ? `Wat gaat er mee voor ${soloPersoon}` : soloCategory ? soloCategory.name : 'Wat gaat er mee'}
+        </h1>
+        {soloPersoon ? (
+          <p style={S.sub}>
+            Jouw spullen plus alles wat voor iedereen meegaat. Vinkjes worden
+            gedeeld — ze staan ook in de{' '}
+            <a href="/inpakken" style={{ color: teal, fontWeight: 600 }}>volledige lijst</a>.
+          </p>
+        ) : soloCategory ? (
           <p style={S.sub}>
             Jouw eigen lijst. Vinkjes worden centraal opgeslagen en zijn ook
             zichtbaar in de{' '}
@@ -476,6 +532,16 @@ export default function PackingList() {
             </p>
           )}
 
+          {!soloCategory && !soloPersoon && (
+            <PersonenBalk
+              personen={personen}
+              filter={persoonFilter}
+              setFilter={setPersoonFilter}
+              onToevoegen={addPersoon}
+              onVerwijderen={removePersoon}
+            />
+          )}
+
           {categories.length > 0 && !soloCategory && (
             <div style={S.filterBar}>
               <div style={S.filterChips}>
@@ -518,6 +584,7 @@ export default function PackingList() {
             const anyVisibleItems = items.some(
               (it) =>
                 (catFilter.length === 0 || catFilter.includes(it.categoryId)) &&
+                zichtbaarVoorPersoon(it) &&
                 (!hideChecked || !it.checked),
             );
             if (visibleCats.length > 0 && !anyVisibleItems && hideChecked) {
@@ -530,7 +597,7 @@ export default function PackingList() {
             }
             return visibleCats.map((cat) => {
               const catIndex = categories.findIndex((c) => c.id === cat.id);
-              const catItems = items.filter((it) => it.categoryId === cat.id);
+              const catItems = items.filter((it) => it.categoryId === cat.id && zichtbaarVoorPersoon(it));
               const shownItems = hideChecked
                 ? catItems.filter((it) => !it.checked)
                 : catItems;
@@ -611,6 +678,9 @@ export default function PackingList() {
                           {it.label}
                           {it.qty === 0 ? <span style={S.skipTag} title="Dit jaar niet mee"> · niet mee</span> : null}
                           {it.note ? <span style={S.noteDot} title="Heeft notitie"> ✎</span> : null}
+                          {it.person && !soloPersoon ? (
+                            <span style={S.persoonTag} title={`Van ${it.person}`}>{it.person}</span>
+                          ) : null}
                         </span>
                         {it.qty > 1 && !it.checked && (
                           <div style={S.packedWrap} title="Alvast gepakt aantal">
@@ -662,6 +732,22 @@ export default function PackingList() {
                               <option key={c.id} value={c.id}>{c.name}</option>
                             ))}
                           </select>
+
+                          {personen.length > 0 && (
+                            <>
+                              <label style={S.editLabel}>Van wie</label>
+                              <select
+                                style={S.editInput}
+                                value={it.person || ''}
+                                onChange={(e) => setItemPersoon(it.id, e.target.value)}
+                              >
+                                <option value="">Voor iedereen</option>
+                                {personen.map((p) => (
+                                  <option key={p} value={p}>{p}</option>
+                                ))}
+                              </select>
+                            </>
+                          )}
 
                           <label style={{ ...S.editLabel, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 10 }}>
                             <input
@@ -749,6 +835,74 @@ body { margin: 0; }
 input[type=number]::-webkit-inner-spin-button { opacity: 1; }
 `;
 
+// Wie gaan er mee, en van wie is wat. Zonder namen ziet niemand hier iets —
+// dan is de lijst gewoon gedeeld, zoals hij altijd was.
+function PersonenBalk({ personen, filter, setFilter, onToevoegen, onVerwijderen }) {
+  const [open, setOpen] = useState(false);
+  const [invoer, setInvoer] = useState('');
+
+  const toggle = (naam) =>
+    setFilter(filter.includes(naam) ? filter.filter((p) => p !== naam) : [...filter, naam]);
+
+  return (
+    <div style={S.persoonBalk}>
+      <div style={S.persoonRij}>
+        {personen.length > 0 && (
+          <>
+            <button
+              style={{ ...S.filterChip, ...(filter.length === 0 ? S.filterChipOn : {}) }}
+              onClick={() => setFilter([])}
+            >Iedereen</button>
+            {personen.map((p) => (
+              <button
+                key={p}
+                style={{ ...S.filterChip, ...(filter.includes(p) ? S.filterChipOn : {}) }}
+                onClick={() => toggle(p)}
+              >{p}</button>
+            ))}
+          </>
+        )}
+        <button style={S.persoonBeheer} onClick={() => setOpen(!open)}>
+          {open ? '▲ Klaar' : personen.length ? '⋯ Wie gaan er mee' : '＋ Wie gaan er mee'}
+        </button>
+      </div>
+
+      {open && (
+        <div style={S.persoonPaneel}>
+          <p style={S.persoonUitleg}>
+            Vul namen in om spullen aan iemand toe te wijzen. Items zonder naam
+            gaan voor iedereen mee en blijven altijd zichtbaar.
+          </p>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              style={{ ...S.addItemInput, flex: 1 }}
+              placeholder="Naam"
+              value={invoer}
+              onChange={(e) => setInvoer(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { onToevoegen(invoer); setInvoer(''); } }}
+            />
+            <button
+              style={S.persoonToevoegen}
+              onClick={() => { onToevoegen(invoer); setInvoer(''); }}
+            >Erbij</button>
+          </div>
+          {personen.length > 0 && (
+            <ul style={S.persoonLijst}>
+              {personen.map((p) => (
+                <li key={p} style={S.persoonRegel}>
+                  <span style={{ flex: 1 }}>{p}</span>
+                  <a href={`/inpakken?persoon=${encodeURIComponent(p)}`} style={S.persoonLink}>eigen lijst</a>
+                  <button style={S.persoonWis} onClick={() => onVerwijderen(p)}>verwijderen</button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const S = {
   page: {
     fontFamily: "'DM Sans', sans-serif", background: paper, color: ink,
@@ -820,9 +974,20 @@ const S = {
   sections: { display: 'flex', flexDirection: 'column', gap: 22 },
   filterBar: { display: 'flex', flexDirection: 'column', gap: 10, padding: '14px', background: '#fff', border: '1px solid #ece7dd', borderRadius: 14 },
   filterChips: { display: 'flex', flexWrap: 'wrap', gap: 6 },
-  filterChip: { fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '6px 12px', borderRadius: 99, border: '1px solid #e0dad0', background: paper, color: '#57534e', cursor: 'pointer' },
+  filterChip: { fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '6px 12px', borderRadius: 99, borderWidth: 1, borderStyle: 'solid', borderColor: '#e0dad0', background: paper, color: '#57534e', cursor: 'pointer' },
   filterChipOn: { background: teal, borderColor: teal, color: '#fff' },
-  hideToggle: { fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '8px 12px', borderRadius: 10, border: '1px solid #e0dad0', background: paper, color: '#57534e', cursor: 'pointer', textAlign: 'left' },
+  persoonTag: { marginLeft: 6, fontSize: 10.5, fontWeight: 600, color: teal, background: tealSoft, padding: '1px 7px', borderRadius: 99, whiteSpace: 'nowrap' },
+  persoonBalk: { marginBottom: 14 },
+  persoonRij: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' },
+  persoonBeheer: { fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600, padding: '6px 12px', borderRadius: 99, borderWidth: 1, borderStyle: 'dashed', borderColor: '#e0dad0', background: 'transparent', color: '#8a8378', cursor: 'pointer' },
+  persoonPaneel: { marginTop: 10, padding: 12, background: paper, border: '1px solid #e0dad0', borderRadius: 12 },
+  persoonUitleg: { fontSize: 12.5, color: '#8a8378', lineHeight: 1.5, margin: '0 0 10px' },
+  persoonToevoegen: { fontFamily: 'inherit', fontSize: 13, fontWeight: 700, padding: '8px 16px', borderRadius: 10, border: 'none', background: teal, color: '#fff', cursor: 'pointer' },
+  persoonLijst: { listStyle: 'none', margin: '10px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 6 },
+  persoonRegel: { display: 'flex', alignItems: 'center', gap: 10, fontSize: 13.5, padding: '6px 2px' },
+  persoonLink: { fontSize: 12, color: teal, fontWeight: 600, textDecoration: 'none' },
+  persoonWis: { border: 'none', background: 'transparent', color: '#cbb9b0', fontSize: 12, cursor: 'pointer', padding: 2 },
+  hideToggle: { fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '8px 12px', borderRadius: 10, borderWidth: 1, borderStyle: 'solid', borderColor: '#e0dad0', background: paper, color: '#57534e', cursor: 'pointer', textAlign: 'left' },
   hideToggleOn: { background: tealSoft, borderColor: tealSoft, color: teal },
   section: {},
   sectionHead: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, paddingBottom: 6, borderBottom: `2px solid ${tealSoft}` },

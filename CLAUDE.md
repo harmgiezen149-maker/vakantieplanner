@@ -179,7 +179,7 @@ Zeven losse Redis-documenten, elk één JSON-blob:
 | Key | Vorm |
 | --- | --- |
 | `planner:trip` | `{ plan, customActivities, locationOverrides, tripConfig, suggestExclusions, updatedAt, updatedBy }` |
-| `planner:inpakken` | `{ categories:[{id,name}], items:[{id,categoryId,label,qty,checked,packed,important,note}], updatedBy, updatedAt }` |
+| `planner:inpakken` | `{ categories:[{id,name}], personen:[naam], items:[{id,categoryId,label,qty,checked,packed,important,note,person}], updatedBy, updatedAt }` |
 | `planner:checklist` | `{ checked:{}, updatedBy, updatedAt }` |
 | `planner:verblijven` | `{ stays:[{id,name,locationLabel,coords,type,typeOther,country,countryCode,startDate,endDate,periodLabel,tripTitle,score,review,photos,source}], updatedBy, updatedAt }` |
 | `planner:fouten` | `{ fouten:[{bron,bericht,detail,pad,versie,aantal,eerst,laatst}], updatedAt }` — max 100 |
