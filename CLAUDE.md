@@ -22,6 +22,10 @@ npx next build       # moet slagen vóór je pusht
 In een websessie draait `npm install` al via de SessionStart-hook
 (`.claude/hooks/session-start.sh`), dus `npx next build` kan meteen.
 
+**Draai `npx next build` nooit terwijl `npm run dev` loopt.** Ze delen de map `.next`, dus
+de build sloopt de draaiende dev-server (`ENOENT … vendor-chunks/…`). Stop de dev-server
+eerst; is het al misgegaan, dan `rm -rf .next` en opnieuw starten.
+
 Er zijn geen tests en geen linter-config. `npx next build` is de enige poort — draai die
 na elke wijziging. De build slaagt zonder Redis-env-vars (je ziet dan alleen
 `[Upstash Redis] Unable to find environment variable` tijdens page-data-collectie); de
@@ -87,6 +91,10 @@ app/
     hiking/     POST      wandelroutes uit OSM-relaties
     resolve-maps/ POST    Google Maps-link → naam + coördinaten
     whats-here/ GET/POST  POI's rond een aangeklikt kaartpunt
+    backup/     GET/POST  reservekopieën: lijst / nieuwe maken
+    backup/run/ GET       adres van de dagelijkse Vercel-cron
+    backup/download/      alles als JSON downloaden (werkt zonder Blob)
+    backup/restore/ POST  momentopname terugzetten
     verblijven/ GET/POST  verblijvenlogboek
     verblijven/upload/    uploadtoken voor Vercel Blob
     verblijven/foto/      foto verwijderen uit Blob (DELETE)
@@ -240,7 +248,15 @@ twee bronnen: het `address`-object dat `/api/geocode` bij een zoekresultaat al m
 verzoek per seconde toe**, dus het bijwerken van bestaande verblijven gaat sequentieel met
 ~1,1 s ertussen — nooit `Promise.all`.
 
-**16. Bewust géén service worker.**
+**16. Terugzetten mag nooit zonder vangnet.**
+`/api/backup/restore` overschrijft alle documenten. Daarom eist hij `bevestigd: true`, én
+maakt hij vlák voor het overschrijven een veiligheidskopie van de huidige staat. Lukt die
+kopie niet — of is er geen Blob — dan **weigert** hij, in plaats van door te gaan. Verzwak
+die volgorde niet: het verschil tussen een reservekopie en een val is precies dat vangnet.
+De cron draait op `/api/backup/run` en niet op `/api/backup`, omdat een Vercel-cron altijd
+een GET doet en het maken van een kopie een POST is.
+
+**17. Bewust géén service worker.**
 De PWA is manifest + iconen, meer niet. Voeg er geen offline-caching aan toe zonder dat
 expliciet te bespreken: gecachete JS naast een gedeeld Redis-document geeft precies de
 "waarom zie ik oude data"-klasse bugs die punt 4 probeert te vermijden.

@@ -7,6 +7,7 @@ import {
   ChevronRight, RefreshCw, User, Wifi, WifiOff, Check, AlertCircle, Lock, MapPin, Map as MapIcon,
   Pencil, Loader2, Car, ChevronUp, ChevronDown, CheckSquare, Backpack, ExternalLink,
   Settings, Home, CalendarRange, Compass, Maximize2, Minimize2, EyeOff, Star,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   COLORS, CATEGORIES, CATEGORY_ORDER, DEFAULT_ACTIVITIES,
@@ -3453,6 +3454,27 @@ ${trkpts}
 const SettingsSheet = ({ onClose, onOpenTripSettings, onClearPlan, onNewVacation }) => (
   <Sheet onClose={onClose} title="Planning beheren">
     <div style={{ padding: '8px 20px 24px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <Link
+        href="/reservekopie"
+        style={{
+          padding: '14px 16px', background: COLORS.creamSoft,
+          border: `1px solid ${COLORS.hairline}`, borderRadius: 12,
+          textAlign: 'left', cursor: 'pointer', textDecoration: 'none',
+          display: 'block',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+          <ShieldCheck size={16} color={COLORS.moss} />
+          <span style={{ fontWeight: 600, color: COLORS.forest, fontSize: 14 }}>
+            Reservekopieën
+          </span>
+        </div>
+        <div style={{ fontSize: 12, color: COLORS.ink, lineHeight: 1.5 }}>
+          Elke nacht wordt alles automatisch bewaard. Hier kun je een kopie
+          downloaden of er een terugzetten.
+        </div>
+      </Link>
+
       <button
         onClick={onOpenTripSettings}
         style={{
