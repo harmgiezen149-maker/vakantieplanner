@@ -1,5 +1,6 @@
 import './globals.css';
 import Foutmelder from '@/components/Foutmelder';
+import VersieWacht from '@/components/VersieWacht';
 
 export const metadata = {
   title: 'Vakantieplanner',
@@ -28,6 +29,7 @@ export default function RootLayout({ children }) {
       <body>
         {/* Vangt browserfouten op en meldt ze; toont zelf niets */}
         <Foutmelder />
+        <VersieWacht />
         {children}
       </body>
     </html>

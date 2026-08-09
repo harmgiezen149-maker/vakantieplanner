@@ -828,7 +828,7 @@ const PlanView = ({ days, plan, activityById, weerPerDag, onAddClick, onRemove, 
 
 // ============ LIBRARY VIEW ============
 
-const LibraryActivity = ({ activity, usedInDays, onAddClick, onDelete, onEditLocation }) => {
+const LibraryActivity = ({ activity, usedInDays, onAddClick, onDelete, onEditLocation, onBezocht }) => {
   const cat = CATEGORIES[activity.category] || CATEGORIES.custom;
   const mapsLink = getMapsLink(activity);
   return (
@@ -843,15 +843,32 @@ const LibraryActivity = ({ activity, usedInDays, onAddClick, onDelete, onEditLoc
         {activity.note && (
           <div style={{ fontSize: 11, color: COLORS.inkLight, marginTop: 2 }}>{activity.note}</div>
         )}
-        {usedInDays > 0 && (
+        {(usedInDays > 0 || activity.visited) && (
           <div style={{
-            fontSize: 10, color: cat.color, marginTop: 4,
-            fontWeight: 600, letterSpacing: 0.3,
+            fontSize: 10, marginTop: 4, fontWeight: 600, letterSpacing: 0.3,
+            display: 'flex', gap: 8,
           }}>
-            Gepland: {usedInDays}×
+            {usedInDays > 0 && <span style={{ color: cat.color }}>Gepland: {usedInDays}×</span>}
+            {activity.visited && <span style={{ color: COLORS.moss }}>✓ Bezocht</span>}
           </div>
         )}
       </div>
+      {/* Bezocht aanvinken vanuit de bibliotheek: de planning wordt lang niet
+          altijd gevolgd, en dan wil je alsnog kunnen vastleggen dat je ergens
+          bent geweest. Vraagt om een dag, want zonder dag kan het bezoek niet
+          aan een verblijf worden gekoppeld (zie lib/bezoek.js). */}
+      <button
+        onClick={() => onBezocht(activity)}
+        style={{
+          border: 'none', cursor: 'pointer', padding: 6, borderRadius: 6,
+          background: activity.visited ? `${COLORS.moss}22` : 'transparent',
+          color: activity.visited ? COLORS.moss : COLORS.inkLight,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          opacity: activity.visited ? 1 : 0.55,
+        }}
+        aria-label={activity.visited ? 'Toch niet bezocht' : 'Markeren als bezocht'}
+        title={activity.visited ? 'Bezocht — tik om terug te draaien' : 'Ik ben hier geweest'}
+      ><Check size={15} /></button>
       <button
         onClick={() => onEditLocation(activity)}
         style={{
@@ -906,7 +923,7 @@ const LibraryActivity = ({ activity, usedInDays, onAddClick, onDelete, onEditLoc
   );
 };
 
-const LibraryView = ({ activities, plan, onAddClick, onCreateCustom, onDeleteCustom, onEditLocation, onOpenSuggestions, onPasteLink, onInDeBuurt }) => {
+const LibraryView = ({ activities, plan, onAddClick, onCreateCustom, onDeleteCustom, onEditLocation, onOpenSuggestions, onPasteLink, onInDeBuurt, onBezocht }) => {
   const planUsage = useMemo(() => {
     const usage = {};
     Object.values(plan).flat().forEach(id => { usage[id] = (usage[id] || 0) + 1; });
@@ -1007,6 +1024,7 @@ const LibraryView = ({ activities, plan, onAddClick, onCreateCustom, onDeleteCus
                   onAddClick={() => onAddClick(a.id)}
                   onDelete={() => onDeleteCustom(a.id)}
                   onEditLocation={onEditLocation}
+                  onBezocht={onBezocht}
                 />
               ))}
             </div>
@@ -1443,6 +1461,22 @@ export default function Planner() {
     return serverUpdate.by ? `${serverUpdate.by} · ${dateStr}` : dateStr;
   }, [serverUpdate]);
 
+  // Bezocht aanvinken vanuit de bibliotheek. Staat de activiteit nog nergens
+  // in de planning, dan vragen we op welke dag het was: zonder dag valt het
+  // bezoek bij geen enkel verblijf (lib/bezoek.js koppelt op datum).
+  const markeerBezocht = (activity) => {
+    if (activity.visited) {
+      updateActivityProps(activity.id, { visited: false });
+      return;
+    }
+    const staatGepland = Object.values(plan).some(ids => (ids || []).includes(activity.id));
+    if (staatGepland) {
+      updateActivityProps(activity.id, { visited: true });
+      return;
+    }
+    setSheet({ type: 'bezocht-dag', activityId: activity.id });
+  };
+
   // Losse functies (in plaats van closures in de JSX) omdat /beheer er
   // rechtstreeks naartoe kan linken: ?beheer=wissen of ?beheer=nieuw.
   const vraagPlanningWissen = () => {
@@ -1577,6 +1611,7 @@ export default function Planner() {
             onOpenSuggestions={() => setSheet({ type: 'suggestions' })}
             onPasteLink={() => setSheet({ type: 'paste-link' })}
             onInDeBuurt={() => setSheet({ type: 'in-de-buurt' })}
+            onBezocht={markeerBezocht}
           />
         )}
 
@@ -1679,6 +1714,21 @@ export default function Planner() {
               id, name: act.name, category: 'custom', emoji: '📍',
               coords: act.coords, note: act.note || null, custom: true,
             }]);
+            setSheet(null);
+          }}
+          onClose={() => setSheet(null)}
+        />
+      )}
+
+      {sheet?.type === 'bezocht-dag' && (
+        <PickDaySheet
+          activity={activityById[sheet.activityId]}
+          plan={plan}
+          days={days}
+          titel="Wanneer ben je hier geweest?"
+          onPick={(dayKey) => {
+            setPlan(p => ({ ...p, [dayKey]: [...(p[dayKey] || []), sheet.activityId] }));
+            updateActivityProps(sheet.activityId, { visited: true });
             setSheet(null);
           }}
           onClose={() => setSheet(null)}

@@ -130,11 +130,13 @@ app/
     delen/bekijk/ GET     de uitgeklede planning achter een token (open!)
     uitgaven/   GET/POST  kasboek van de reis
     weer/       GET       weersverwachting per dag (Open-Meteo, geen sleutel)
+    versie/     GET       welke build er draait (voor de update-melding)
 components/   Planner.jsx (planscherm), MapView.jsx, DayOverview.jsx,
               PackingList.jsx, Checklist.jsx, StayLog.jsx, LocationPicker.jsx,
               Beheer.jsx, BackupBeheer.jsx, FoutenLijst.jsx,
               Poort.jsx (PinPoort + BeheerPoort), ConflictMelding.jsx,
-              OfflineMelding.jsx, Foutmelder.jsx, Reisverslag.jsx, Uitgaven.jsx,
+              OfflineMelding.jsx, Foutmelder.jsx, VersieWacht.jsx,
+              Reisverslag.jsx, Uitgaven.jsx,
               Bekijken.jsx, DeelLink.jsx
   planner/    de sheets van het planscherm — zie hieronder
 lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
@@ -412,6 +414,12 @@ bewaart daarnáást een **momentopname** in `stay.bezocht`: naam, emoji, notitie
 datum. Geen verwijzing, een kopie — want `planner:trip` wordt gewist bij "nieuwe vakantie
 starten", en dát is precies het moment waarop je je terugblik wilt kunnen bekijken.
 Zelfde afweging als bij de foto's.
+
+Aanvinken kan op twee plekken: op de chip in de planning, en in de bibliotheek. Dat
+tweede is er omdat de planning lang niet altijd wordt gevolgd — je doet onderweg dingen
+die er niet in stonden. Staat zo'n activiteit nog nergens op een dag, dan **vraagt de
+app eerst wélke dag** het was: zonder dag valt het bezoek bij geen enkel verblijf, en dan
+zou het aanvinken stilletjes niets opleveren.
 
 `lib/bezoek.js` koppelt de twee: `bezoekPerVerblijf()` zoekt per verblijf de aangevinkte
 activiteiten waarvan de dag binnen de periode valt. Twee dingen die daarin vastliggen:

@@ -96,8 +96,10 @@ export const PickActivitySheet = ({ activities, plan, days, dayKey, onPick, onCl
   );
 };
 
-export const PickDaySheet = ({ activity, plan, days, onPick, onClose }) => (
-  <Sheet onClose={onClose} title={`"${activity?.name}" toevoegen aan…`}>
+// `titel` overschrijft de kop: dezelfde sheet wordt ook gebruikt om te vragen
+// op wélke dag je ergens bent geweest, en dan klopt "toevoegen aan" niet.
+export const PickDaySheet = ({ activity, plan, days, onPick, onClose, titel }) => (
+  <Sheet onClose={onClose} title={titel || `"${activity?.name}" toevoegen aan…`}>
     <div style={{ padding: '16px 20px 24px', display: 'flex', flexDirection: 'column', gap: 6 }}>
       {days.map(day => {
         const count = (plan[day.key] || []).length;
