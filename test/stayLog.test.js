@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { groepeerReizen, tripStayId, stayFromTripStay } from '../lib/stayLog.js';
 import { stayTypeLabel, countryFlag, STAY_TYPES } from '../lib/stayTypes.js';
-import { sanitizeStay } from '../lib/stayValidation.js';
+import { sanitizeStay, schoneWebsite } from '../lib/stayValidation.js';
 
 const verblijf = (over = {}) => ({
   id: 'v1', name: 'Camping', coords: [48, 6], startDate: '2026-07-25', endDate: '2026-08-01', ...over,
@@ -159,4 +159,41 @@ test('onzinnige coördinaten worden geweigerd', () => {
 test("foto's zonder url vallen weg", () => {
   const uit = sanitizeStay({ photos: [{ url: 'https://x/1.jpg' }, { caption: 'geen url' }] });
   assert.equal(uit.photos.length, 1);
+});
+
+// ── Website van een verblijf ────────────────────────────────────────
+// Dit veld wordt een aanklikbare link op de pagina, dus wat hier doorheen
+// komt bepaalt waar iemand met één tik terechtkomt.
+
+test('een adres zonder schema krijgt https ervoor', () => {
+  assert.equal(schoneWebsite('campingdesmessires.fr'), 'https://campingdesmessires.fr/');
+  assert.equal(schoneWebsite('www.example.com/plek'), 'https://www.example.com/plek');
+});
+
+test('http en https blijven zoals ze zijn', () => {
+  assert.equal(schoneWebsite('https://example.com/'), 'https://example.com/');
+  assert.equal(schoneWebsite('http://example.com/'), 'http://example.com/');
+});
+
+test('alleen http(s) komt erdoor', () => {
+  // Een javascript:-adres in een href is een gat, geen website
+  assert.equal(schoneWebsite('javascript:alert(1)'), null);
+  assert.equal(schoneWebsite('data:text/html,<script>x</script>'), null);
+  assert.equal(schoneWebsite('ftp://example.com'), null);
+  assert.equal(schoneWebsite('  JavaScript:alert(1)  '), null);
+});
+
+test('iets dat geen adres is levert niets op', () => {
+  assert.equal(schoneWebsite('gewoon wat tekst'), null);
+  assert.equal(schoneWebsite('camping'), null, 'één woord is geen hostnaam');
+  assert.equal(schoneWebsite(''), null);
+  assert.equal(schoneWebsite('   '), null);
+  assert.equal(schoneWebsite(null), null);
+  assert.equal(schoneWebsite(42), null);
+});
+
+test('de website gaat mee door de opschoning van een verblijf', () => {
+  assert.equal(sanitizeStay({ website: 'example.com' }).website, 'https://example.com/');
+  assert.equal(sanitizeStay({ website: 'javascript:alert(1)' }).website, null);
+  assert.equal(sanitizeStay({}).website, null);
 });

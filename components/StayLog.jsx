@@ -6,6 +6,7 @@ import { upload } from '@vercel/blob/client';
 import {
   ArrowLeft, Plus, Trash2, Star, MapPin, Camera, Loader2, X, ChevronDown,
   SlidersHorizontal, RefreshCw, Maximize2, Minimize2, Calendar as CalendarIcon,
+  Globe,
 } from 'lucide-react';
 import { COLORS, formatDateRange } from '@/lib/data';
 import { getPin } from '@/lib/maps';
@@ -13,7 +14,7 @@ import LocationPicker from '@/components/LocationPicker';
 import ConflictMelding from '@/components/ConflictMelding';
 import {
   uid, fetchStayLog, saveStayLog, archiveTripStays,
-  reverseCountry, countryFromAddress, groepeerReizen,
+  reverseCountry, countryFromAddress, groepeerReizen, jarenVanVerblijf,
 } from '@/lib/stayLog';
 import {
   STAY_TYPES, stayTypeLabel, countryFlag,
@@ -33,19 +34,9 @@ const scoreColor = (score) => {
 };
 
 // In welke jaren viel dit verblijf? Meestal één, bij een oudejaarsvakantie
-// twee. Verblijven zonder echte datums hebben vaak wél een jaartal in de vrije
-// periodetekst ("zomer 2003") — dat pikken we daaruit, anders vallen ze buiten
-// elk jaarfilter terwijl je precies weet wanneer het was.
-function jarenVan(stay) {
-  const jaren = new Set();
-  if (stay.startDate) jaren.add(stay.startDate.slice(0, 4));
-  if (stay.endDate) jaren.add(stay.endDate.slice(0, 4));
-  if (jaren.size === 0 && stay.periodLabel) {
-    const m = /\b(?:19|20)\d{2}\b/.exec(stay.periodLabel);
-    if (m) jaren.add(m[0]);
-  }
-  return [...jaren];
-}
+// twee. De jaar-bepaling zelf staat in lib/stayLog.js, want het reisverslag
+// rekent met precies dezelfde regel.
+const jarenVan = jarenVanVerblijf;
 
 // ── Kaart met alle verblijven ───────────────────────────────────────
 // Zelfde patroon als DayOverview: Leaflet browser-only via dynamic import,
@@ -591,6 +582,7 @@ export default function StayLog() {
       endDate: data.endDate || null,
       periodLabel: data.periodLabel || null,
       tripTitle: null,
+      website: data.website || null,
       score: data.score ?? null,
       review: data.review || null,
       photos: [],
@@ -1450,6 +1442,19 @@ const StayCard = ({
             </div>
           )}
         </div>
+        {stay.website && (
+          // stopPropagation: anders klapt de kaart open/dicht bij het aantikken
+          // van de link, en dat is precies niet wat je bedoelde.
+          <a
+            href={stay.website}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            style={S.siteLink}
+            title={stay.website}
+            aria-label={`Website van ${stay.name}`}
+          ><Globe size={14} /></a>
+        )}
         {stay.photos?.length > 0 && (
           <div style={S.photoCount}><Camera size={12} /> {stay.photos.length}</div>
         )}
@@ -1529,6 +1534,17 @@ const StayCard = ({
             value={stay.periodLabel || ''}
             onChange={(e) => onUpdate({ periodLabel: e.target.value.slice(0, 60) || null })}
             placeholder="Bv. “zomer 2003”"
+          />
+
+          <label style={S.label}>Website (optioneel)</label>
+          <input
+            style={S.input}
+            value={stay.website || ''}
+            onChange={(e) => onUpdate({ website: e.target.value.slice(0, 300) || null })}
+            placeholder="camping-voorbeeld.fr"
+            inputMode="url"
+            autoCapitalize="off"
+            autoCorrect="off"
           />
 
           <label style={S.label}>Cijfer</label>
@@ -1723,6 +1739,12 @@ const S = {
   reisStip: {
     width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
     display: 'inline-block',
+  },
+  siteLink: {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    width: 28, height: 28, borderRadius: 8, flexShrink: 0,
+    color: COLORS.lake, background: 'rgba(58, 126, 132, 0.10)',
+    textDecoration: 'none',
   },
   photoCount: {
     display: 'flex', alignItems: 'center', gap: 3,

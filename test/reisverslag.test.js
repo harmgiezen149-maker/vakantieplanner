@@ -7,6 +7,7 @@ const verblijf = (o) => ({
   name: o.name || 'Ergens',
   startDate: o.startDate ?? null,
   endDate: o.endDate ?? null,
+  periodLabel: o.periodLabel ?? null,
   score: o.score ?? null,
   country: o.country ?? null,
   type: o.type ?? null,
@@ -125,15 +126,55 @@ test('twee losstaande periodes worden twee reizen', () => {
   assert.deepEqual(v.jaren.map(j => j.reizen), [1, 1]);
 });
 
-test('een verblijf zonder datum telt mee als verblijf maar niet als reis', () => {
+test('een verblijf zonder enig jaar telt mee als verblijf maar niet als reis', () => {
   const v = maakVerslag([
     verblijf({ startDate: '2026-08-01', endDate: '2026-08-08', score: 8 }),
     verblijf({ name: 'Ooit in Spanje', score: 6, country: 'Spanje' }),
   ]);
-  assert.equal(v.totaal.aantalReizen, 1, 'zonder datum weet je niet wanneer');
+  assert.equal(v.totaal.aantalReizen, 1, 'zonder jaar weet je niet wanneer');
   assert.equal(v.totaal.aantalVerblijven, 2, 'maar je bent er wel geweest');
   assert.equal(v.totaal.gemiddeldCijfer, 7, 'en het cijfer telt gewoon mee');
   assert.equal(v.reizen.filter(r => r.los).length, 1);
+});
+
+// ── Losse periode uit het hoofd ─────────────────────────────────────
+// "zomer 2003" is geen datum, maar je weet wél in welk jaar je er was. Dat
+// mag niet buiten de statistiek vallen — dat was precies de klacht.
+
+test('een losse periode met een jaartal telt als reis in dat jaar', () => {
+  const v = maakVerslag([
+    verblijf({ name: 'Camping van vroeger', periodLabel: 'zomer 2003', score: 8, country: 'Frankrijk' }),
+  ]);
+  assert.equal(v.totaal.aantalReizen, 1);
+  assert.deepEqual(v.jaren.map(j => j.jaar), [2003]);
+  assert.equal(v.jaren[0].reizen, 1);
+  assert.equal(v.jaren[0].nachten, 0, 'het aantal nachten weten we niet — verzinnen is erger');
+  assert.equal(v.totaal.eersteJaar, 2003);
+});
+
+test('losse en gedateerde reizen staan door elkaar in dezelfde jarenlijst', () => {
+  const v = maakVerslag([
+    verblijf({ periodLabel: 'voorjaar 2003', score: 7 }),
+    verblijf({ startDate: '2026-08-01', endDate: '2026-08-08', score: 9 }),
+  ]);
+  assert.equal(v.totaal.aantalReizen, 2);
+  assert.deepEqual(v.jaren.map(j => j.jaar), [2003, 2026]);
+  assert.deepEqual(v.jaren.map(j => j.nachten), [0, 7]);
+  assert.deepEqual(v.jaren.map(j => j.reizen), [1, 1]);
+  assert.equal(v.totaal.eersteJaar, 2003);
+  assert.equal(v.totaal.laatsteJaar, 2026);
+});
+
+test('een periodetekst zonder jaartal levert niets op', () => {
+  const v = maakVerslag([verblijf({ name: 'Ooit', periodLabel: 'lang geleden', score: 5 })]);
+  assert.equal(v.totaal.aantalReizen, 0, 'geen jaar, dus geen plek in de tijdlijn');
+  assert.equal(v.totaal.aantalVerblijven, 1);
+  assert.deepEqual(v.jaren, []);
+});
+
+test('een getal dat geen jaartal is wordt niet als jaar gelezen', () => {
+  const v = maakVerslag([verblijf({ periodLabel: 'huisje 42, week 7', score: 6 })]);
+  assert.deepEqual(v.jaren, [], 'alleen 19xx en 20xx tellen als jaartal');
 });
 
 test('een reis over de jaargrens telt bij het jaar waarin hij eindigt', () => {
