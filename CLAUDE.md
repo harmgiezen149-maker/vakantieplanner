@@ -415,9 +415,15 @@ datum. Geen verwijzing, een kopie — want `planner:trip` wordt gewist bij "nieu
 starten", en dát is precies het moment waarop je je terugblik wilt kunnen bekijken.
 Zelfde afweging als bij de foto's.
 
-Aanvinken kan op twee plekken: op de chip in de planning, en in de bibliotheek. Dat
-tweede is er omdat de planning lang niet altijd wordt gevolgd — je doet onderweg dingen
-die er niet in stonden. Staat zo'n activiteit nog nergens op een dag, dan **vraagt de
+Aanvinken kan op drie plekken: op de chip in de planning, op `/dag`, en in de
+bibliotheek. Dat laatste is er omdat de planning lang niet altijd wordt gevolgd — je doet
+onderweg dingen die er niet in stonden.
+
+**`/dag` was tot dan toe alleen-lezen en is dat nu niet meer.** Daar hoorden drie dingen
+bij, en die moeten blijven staan: de PUT stuurt `tripConfig` en `suggestExclusions`
+bewust **niet** mee zodat de route ze uit de opgeslagen staat terughaalt (valkuil 3),
+`basisVersie` gaat mee met de botsingsbalk erbij (valkuil 4), en offline is de knop
+uitgeschakeld (valkuil 19 — je zou anders op een gedateerde kopie schrijven). Staat zo'n activiteit nog nergens op een dag, dan **vraagt de
 app eerst wélke dag** het was: zonder dag valt het bezoek bij geen enkel verblijf, en dan
 zou het aanvinken stilletjes niets opleveren.
 

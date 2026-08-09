@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Car, Download } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Car, Download, Check } from 'lucide-react';
 import {
   COLORS, CATEGORIES, DEFAULT_ACTIVITIES,
   DEFAULT_TRIP_CONFIG, buildDays, staysWithColors,
@@ -12,6 +12,7 @@ import { useRoute } from '@/lib/useRoute';
 import { useWeer } from '@/lib/useWeer';
 import { formatTemp } from '@/lib/weer';
 import OfflineMelding from '@/components/OfflineMelding';
+import ConflictMelding from '@/components/ConflictMelding';
 import { bewaarLokaal, leesLokaal } from '@/lib/offline';
 
 const getPin = () => {
@@ -64,6 +65,34 @@ async function fetchPlan() {
     headers: { 'X-Family-Pin': getPin() },
     cache: 'no-store',
   });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// Deze pagina was lang alleen-lezen. Sinds je hier activiteiten als bezocht
+// kunt aanvinken schrijft hij wél, en dus horen er twee dingen bij:
+//
+//   1. tripConfig en suggestExclusions sturen we NIET mee — de route haalt die
+//      uit de opgeslagen staat terug (valkuil 3). Zouden we ze wel meesturen,
+//      dan overschrijft dit scherm de reisinstellingen met wat het toevallig
+//      geladen had.
+//   2. basisVersie mee, zodat een botsing zichtbaar wordt (valkuil 4).
+async function savePlan(plan, customActivities, locationOverrides, basisVersie) {
+  const res = await fetch('/api/plan', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Family-Pin': getPin() },
+    body: JSON.stringify({
+      plan, customActivities, locationOverrides,
+      updatedBy: (typeof window !== 'undefined' && localStorage.getItem('planner-name')) || null,
+      basisVersie,
+    }),
+  });
+  if (res.status === 409) {
+    const info = await res.json().catch(() => ({}));
+    const err = new Error('conflict');
+    err.conflict = info;
+    throw err;
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -234,6 +263,9 @@ export default function DayOverview() {
   const [error, setError] = useState(null);
   const [dayIndex, setDayIndex] = useState(null);
   const [offlineOp, setOfflineOp] = useState(null);
+  const [conflict, setConflict] = useState(null);
+  const [opslaan, setOpslaan] = useState(false);
+  const versie = useRef(null);
 
   const days = useMemo(() => buildDays(tripConfig), [tripConfig]);
 
@@ -251,14 +283,14 @@ export default function DayOverview() {
         const data = await fetchPlan();
         bewaarLokaal('trip', data);
         setOfflineOp(null);
+        versie.current = data.updatedAt ?? null;
         setPlan(data.plan || {});
         setCustomActivities(data.customActivities || []);
         setLocationOverrides(data.locationOverrides || {});
         if (data.tripConfig) setTripConfig(data.tripConfig);
       } catch {
-        // Deze pagina is alleen-lezen, dus de kopie tonen is hier gratis —
-        // er valt niets te overschrijven. De balk erboven blijft wel nodig:
-        // je moet weten dat je naar iets van gisteren kijkt.
+        // Geen verbinding: de laatst geladen versie tonen, met de balk erboven.
+        // Aanvinken is dan uit — zie het commentaar bij markeerBezocht.
         const kopie = leesLokaal('trip');
         if (kopie) {
           setPlan(kopie.data.plan || {});
@@ -294,6 +326,36 @@ export default function DayOverview() {
     });
     return obj;
   }, [allActivities, locationOverrides]);
+
+  // Bezocht aanvinken. De vlag hoort bij de activiteit, niet bij de dag
+  // (valkuil 1), dus custom → customActivities, ingebouwd → locationOverrides.
+  const markeerBezocht = async (activity) => {
+    if (offlineOp || opslaan) return;   // offline niet schrijven (valkuil 19)
+
+    const isCustom = customActivities.some(a => a.id === activity.id);
+    const patch = { visited: !activity.visited };
+    const nieuweCustom = isCustom
+      ? customActivities.map(a => (a.id === activity.id ? { ...a, ...patch } : a))
+      : customActivities;
+    const nieuweOverrides = isCustom
+      ? locationOverrides
+      : { ...locationOverrides, [activity.id]: { ...(locationOverrides[activity.id] || {}), ...patch } };
+
+    setCustomActivities(nieuweCustom);
+    setLocationOverrides(nieuweOverrides);
+    setOpslaan(true);
+    try {
+      const data = await savePlan(plan, nieuweCustom, nieuweOverrides, versie.current);
+      versie.current = data.updatedAt ?? null;
+      setConflict(null);
+    } catch (e) {
+      if (e?.conflict) setConflict(e.conflict);
+      // Andere fouten: de volgende tik probeert het opnieuw. De vlag staat
+      // lokaal al goed, dus je ziet wat je bedoelde.
+    } finally {
+      setOpslaan(false);
+    }
+  };
 
   const day = dayIndex !== null ? days[dayIndex] : null;
   const acts = useMemo(() => {
@@ -359,6 +421,22 @@ export default function DayOverview() {
         {offlineOp && (
           <div style={{ marginTop: 16 }}>
             <OfflineMelding op={offlineOp} onOpnieuw={() => window.location.reload()} />
+          </div>
+        )}
+
+        {conflict && (
+          <div style={{ marginTop: 16 }}>
+            <ConflictMelding
+              door={conflict.door}
+              onLaadHunVersie={() => { setConflict(null); window.location.reload(); }}
+              onForceer={async () => {
+                setConflict(null);
+                try {
+                  const data = await savePlan(plan, customActivities, locationOverrides, undefined);
+                  versie.current = data.updatedAt ?? null;
+                } catch { /* volgende tik probeert het opnieuw */ }
+              }}
+            />
           </div>
         )}
 
@@ -554,7 +632,9 @@ export default function DayOverview() {
                               display: 'flex', alignItems: 'center', gap: 6,
                             }}>
                               {act.important && <span style={{ color: '#C97D5D' }}>★</span>}
-                              <span>{act.emoji} {act.name}</span>
+                              <span style={{ opacity: act.visited ? 0.75 : 1 }}>
+                                {act.emoji} {act.name}
+                              </span>
                             </div>
                             <div style={{ fontSize: 11, color: COLORS.inkLight, marginTop: 2 }}>
                               {cat.name}
@@ -566,6 +646,22 @@ export default function DayOverview() {
                               }}>{act.note}</div>
                             )}
                           </div>
+                          <button
+                            onClick={() => markeerBezocht(act)}
+                            disabled={!!offlineOp}
+                            style={{
+                              border: 'none', borderRadius: 8, padding: 5, flexShrink: 0,
+                              cursor: offlineOp ? 'default' : 'pointer',
+                              background: act.visited ? `${COLORS.moss}22` : 'transparent',
+                              color: act.visited ? COLORS.moss : COLORS.inkLight,
+                              opacity: offlineOp ? 0.35 : (act.visited ? 1 : 0.55),
+                              display: 'flex', alignItems: 'center',
+                            }}
+                            aria-label={act.visited ? 'Toch niet bezocht' : 'Markeren als bezocht'}
+                            title={offlineOp
+                              ? 'Offline — wijzigingen worden niet bewaard'
+                              : act.visited ? 'Bezocht — tik om terug te draaien' : 'Ik ben hier geweest'}
+                          ><Check size={16} /></button>
                           {mapsLink && (
                             <a
                               href={mapsLink}
