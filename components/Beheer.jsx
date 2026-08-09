@@ -10,7 +10,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import {
-  ChevronLeft, Archive, AlertTriangle, Trash2, Sparkles, ShieldCheck, Share2,
+  ChevronLeft, Archive, AlertTriangle, Trash2, Sparkles, ShieldCheck, Share2, Settings,
 } from 'lucide-react';
 import { COLORS } from '@/lib/data';
 import BackupBeheer from '@/components/BackupBeheer';
@@ -21,7 +21,7 @@ const TABS = [
   { key: 'kopie', label: 'Reservekopieën', icon: Archive },
   { key: 'fouten', label: 'Foutenlogboek', icon: AlertTriangle },
   { key: 'delen', label: 'Meekijk-link', icon: Share2 },
-  { key: 'wissen', label: 'Opruimen', icon: Trash2 },
+  { key: 'wissen', label: 'Reis & opruimen', icon: Trash2 },
 ];
 
 export default function Beheer() {
@@ -68,6 +68,16 @@ export default function Beheer() {
 function Opruimen() {
   return (
     <div style={S.kaarten}>
+      <div style={S.kaart}>
+        <div style={S.kaartKop}><Settings size={16} color={COLORS.lake} /> Reis instellen</div>
+        <p style={S.kaartTekst}>
+          Titel, periode en verblijven aanpassen. De dagenlijst wordt daar
+          automatisch opnieuw op gebouwd. Dit wist niets — het verschuift alleen
+          de dagen als je de periode verandert.
+        </p>
+        <Link href="/?beheer=reis" style={S.kaartKnop}>Naar de reisinstellingen</Link>
+      </div>
+
       <div style={S.kaart}>
         <div style={S.kaartKop}><Sparkles size={16} color={COLORS.forest} /> Nieuwe vakantie starten</div>
         <p style={S.kaartTekst}>

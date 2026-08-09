@@ -116,9 +116,15 @@ const Header = ({ tripConfig, stays, totalDays, stats, name, onNameChange, syncS
 
   const stayNames = stays.map(s => s.name).filter(Boolean).join(' · ');
   const period = formatPeriod(tripConfig);
+  const ingesteld = isTripConfigured(tripConfig);
+  // Drie of meer verblijfsnamen achter elkaar breken op een telefoon lelijk af;
+  // dan liever het aantal. De namen staan voluit in de reisinstellingen.
+  const onderschrift = stays.length > 2
+    ? [`${stays.length} verblijven`, period].filter(Boolean).join(' · ')
+    : [stayNames, period].filter(Boolean).join(' · ');
 
   return (
-    <header style={{ padding: '24px 20px 12px', position: 'relative', zIndex: 1 }}>
+    <header style={{ padding: '22px 20px 10px', position: 'relative', zIndex: 1 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <span style={{
           fontSize: 11, letterSpacing: 2, textTransform: 'uppercase',
@@ -130,70 +136,72 @@ const Header = ({ tripConfig, stays, totalDays, stats, name, onNameChange, syncS
         <SyncIndicator status={syncStatus} onRefresh={onRefresh} />
       </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        <div style={{ flex: '1 1 240px', minWidth: 200 }}>
-          <h1 style={{
-            fontFamily: "'Fraunces', serif",
-            fontSize: 34, lineHeight: 1.08, margin: 0,
-            color: COLORS.forest, fontWeight: 500, letterSpacing: '-0.02em',
-          }}>
-            {tripConfig.title || 'Onze vakantie'}
-          </h1>
+      <h1 style={{
+        fontFamily: "'Fraunces', serif",
+        fontSize: 32, lineHeight: 1.08, margin: 0,
+        color: COLORS.forest, fontWeight: 500, letterSpacing: '-0.02em',
+      }}>
+        {tripConfig.title || 'Onze vakantie'}
+      </h1>
 
-          <p style={{ margin: '10px 0 0', color: COLORS.ink, fontSize: 13, lineHeight: 1.5 }}>
-            {[stayNames, period].filter(Boolean).join(' · ') || 'Stel de reis in via Instellingen'}
-          </p>
-        </div>
+      {ingesteld ? (
+        <p style={{ margin: '8px 0 0', color: COLORS.ink, fontSize: 13, lineHeight: 1.5 }}>
+          {onderschrift}
+        </p>
+      ) : (
+        // Zonder reis is dit de enige plek in beeld die naar de instellingen
+        // wijst — de sheet gaat bij een eerste bezoek vanzelf open, maar wie
+        // hem wegklikt moet er terug kunnen komen.
+        <button
+          onClick={onOpenTripSettings}
+          style={{
+            margin: '8px 0 0', padding: 0, border: 'none', background: 'transparent',
+            color: COLORS.lake, fontSize: 13, lineHeight: 1.5, cursor: 'pointer',
+            fontFamily: "'DM Sans', sans-serif", fontWeight: 600, textAlign: 'left',
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+          }}
+        >
+          <Settings size={14} /> Stel de reis in
+        </button>
+      )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: '0 1 200px', minWidth: 170 }}>
-          {[
-            { href: '/dag', icon: <CalendarIcon size={18} />, label: 'Dagoverzicht' },
-            { href: '/kaart', icon: <MapIcon size={18} />, label: 'Kaart' },
-            { href: '/checklist', icon: <CheckSquare size={18} />, label: 'Auto & documenten' },
-            { href: '/inpakken', icon: <Backpack size={18} />, label: 'Inpaklijst' },
-            { href: '/verblijven', icon: <Star size={18} />, label: 'Verblijven' },
-            { href: '/uitgaven', icon: <Wallet size={18} />, label: 'Uitgaven' },
-          ].map((b) => (
-            <Link
-              key={b.href}
-              href={b.href}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                padding: '11px 13px',
-                background: 'rgba(58, 126, 132, 0.10)',
-                color: COLORS.forest,
-                borderRadius: 12,
-                textDecoration: 'none',
-                fontFamily: "'DM Sans', sans-serif",
-                fontSize: 14, fontWeight: 600,
-              }}
-            >
-              <span style={{ color: COLORS.lake, display: 'flex', flexShrink: 0 }}>{b.icon}</span>
-              <span style={{ flex: 1 }}>{b.label}</span>
-              <ChevronRight size={16} style={{ color: COLORS.lake, flexShrink: 0 }} />
-            </Link>
-          ))}
-          <button
-            onClick={onOpenTripSettings}
+      {/* Eén raster in plaats van een kolom knoppen: op een telefoon drie per
+          rij, op een breed scherm passen ze in één rij. Dat scheelt bijna een
+          half scherm voordat de planning begint. */}
+      <nav style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))',
+        gap: 8, marginTop: 16,
+      }}>
+        {[
+          { href: '/dag', icon: <CalendarIcon size={19} />, label: 'Dagen' },
+          { href: '/kaart', icon: <MapIcon size={19} />, label: 'Kaart' },
+          { href: '/checklist', icon: <CheckSquare size={19} />, label: 'Checklist' },
+          { href: '/inpakken', icon: <Backpack size={19} />, label: 'Inpakken' },
+          { href: '/verblijven', icon: <Star size={19} />, label: 'Verblijven' },
+          { href: '/uitgaven', icon: <Wallet size={19} />, label: 'Uitgaven' },
+        ].map((b) => (
+          <Link
+            key={b.href}
+            href={b.href}
             style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              padding: '11px 13px',
-              background: 'transparent',
+              display: 'flex', flexDirection: 'column', alignItems: 'center',
+              justifyContent: 'center', gap: 6,
+              padding: '12px 6px',
+              background: 'rgba(58, 126, 132, 0.10)',
               color: COLORS.forest,
-              border: `1px dashed ${COLORS.lake}60`,
-              borderRadius: 12,
-              cursor: 'pointer',
+              borderRadius: 14,
+              textDecoration: 'none',
               fontFamily: "'DM Sans', sans-serif",
-              fontSize: 14, fontWeight: 600,
-              textAlign: 'left',
+              fontSize: 12.5, fontWeight: 600,
+              textAlign: 'center',
             }}
           >
-            <span style={{ color: COLORS.lake, display: 'flex', flexShrink: 0 }}><Settings size={18} /></span>
-            <span style={{ flex: 1 }}>Reis instellen</span>
-            <ChevronRight size={16} style={{ color: COLORS.lake, flexShrink: 0 }} />
-          </button>
-        </div>
-      </div>
+            <span style={{ color: COLORS.lake, display: 'flex' }}>{b.icon}</span>
+            <span>{b.label}</span>
+          </Link>
+        ))}
+      </nav>
 
       <div style={{ display: 'flex', gap: 14, marginTop: 14, fontSize: 13, alignItems: 'flex-end' }}>
         <div>
@@ -1424,16 +1432,17 @@ export default function Planner() {
     });
   };
 
-  // Vanaf /beheer doorgestuurd? Open dan meteen de bijbehorende vraag, en haal
-  // de parameter uit de URL zodat een verversing hem niet opnieuw opent.
+  // Vanaf /beheer doorgestuurd? Open dan meteen het bijbehorende scherm, en
+  // haal de parameter uit de URL zodat een verversing hem niet opnieuw opent.
   useEffect(() => {
     if (loading) return;
     const params = new URLSearchParams(window.location.search);
     const actie = params.get('beheer');
-    if (actie !== 'wissen' && actie !== 'nieuw') return;
+    if (!['wissen', 'nieuw', 'reis'].includes(actie)) return;
     window.history.replaceState({}, '', window.location.pathname);
     if (actie === 'wissen') vraagPlanningWissen();
-    else vraagNieuweVakantie();
+    else if (actie === 'nieuw') vraagNieuweVakantie();
+    else setSheet({ type: 'trip-settings' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
 
