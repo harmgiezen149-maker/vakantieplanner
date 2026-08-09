@@ -6,7 +6,7 @@ import {
   Plus, X, Trash2, Sparkles, Calendar as CalendarIcon,
   ChevronRight, RefreshCw, User, Wifi, WifiOff, Check, AlertCircle, MapPin, Map as MapIcon,
   Pencil, Car, ChevronUp, ChevronDown, CheckSquare, Backpack,
-  Settings, CalendarRange, Compass, Star, ShieldCheck, Wallet,
+  Settings, CalendarRange, Compass, Star, ShieldCheck, Wallet, Crosshair,
 } from 'lucide-react';
 import {
   COLORS, CATEGORIES, CATEGORY_ORDER, DEFAULT_ACTIVITIES,
@@ -32,6 +32,7 @@ import CustomActivityForm from '@/components/planner/CustomActivityForm';
 import LocationEditSheet from '@/components/planner/LocationEditSheet';
 import ConfirmSheet from '@/components/planner/ConfirmSheet';
 import PasteLinkSheet from '@/components/planner/PasteLinkSheet';
+import InDeBuurtSheet from '@/components/planner/InDeBuurtSheet';
 import SuggestionsSheet from '@/components/planner/SuggestionsSheet';
 
 // ============ API CLIENT ============
@@ -401,12 +402,33 @@ const ActivityChip = ({ activity, dayKey, days, onRemove, onEditLocation, onMove
           display: 'flex', alignItems: 'center', gap: 5,
         }}>
           {activity.important && <span style={{ color: COLORS.sunset, fontSize: 13 }}>★</span>}
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{activity.name}</span>
+          <span style={{
+            overflow: 'hidden', textOverflow: 'ellipsis',
+            // Bezocht = gedaan. Doorstrepen zou "geschrapt" suggereren, dus
+            // alleen wat gedempter, met het vinkje ernaast als het echte teken.
+            opacity: activity.visited ? 0.75 : 1,
+          }}>{activity.name}</span>
         </div>
         {activity.note && (
           <div style={{ fontSize: 11, color: COLORS.inkLight, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{activity.note}</div>
         )}
       </div>
+      {/* Werkelijk bezocht. Zit op de activiteit, niet op de dag — dezelfde
+          activiteit op twee dagen deelt dus deze vlag (valkuil 1). */}
+      <button
+        onClick={() => onUpdateProps(activity.id, { visited: !activity.visited })}
+        style={{
+          border: 'none', cursor: 'pointer', padding: 4, borderRadius: 6,
+          background: activity.visited ? `${COLORS.moss}22` : 'transparent',
+          color: activity.visited ? COLORS.moss : COLORS.inkLight,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          opacity: activity.visited ? 1 : 0.55,
+        }}
+        aria-label={activity.visited ? 'Toch niet bezocht' : 'Markeren als bezocht'}
+        title={activity.visited ? 'Bezocht — tik om terug te draaien' : 'Markeren als bezocht'}
+      >
+        <Check size={15} />
+      </button>
       <button
         onClick={() => onEditLocation(activity)}
         style={{
@@ -884,7 +906,7 @@ const LibraryActivity = ({ activity, usedInDays, onAddClick, onDelete, onEditLoc
   );
 };
 
-const LibraryView = ({ activities, plan, onAddClick, onCreateCustom, onDeleteCustom, onEditLocation, onOpenSuggestions, onPasteLink }) => {
+const LibraryView = ({ activities, plan, onAddClick, onCreateCustom, onDeleteCustom, onEditLocation, onOpenSuggestions, onPasteLink, onInDeBuurt }) => {
   const planUsage = useMemo(() => {
     const usage = {};
     Object.values(plan).flat().forEach(id => { usage[id] = (usage[id] || 0) + 1; });
@@ -944,6 +966,21 @@ const LibraryView = ({ activities, plan, onAddClick, onCreateCustom, onDeleteCus
         }}
       >
         <MapPin size={15} /> Plak een Google Maps-link
+      </button>
+
+      <button
+        onClick={onInDeBuurt}
+        style={{
+          width: '100%', padding: 13,
+          background: 'transparent', color: COLORS.forest,
+          border: `1px solid ${COLORS.forest}`,
+          borderRadius: 12, fontSize: 13.5, fontFamily: "'DM Sans', sans-serif",
+          fontWeight: 600, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          marginTop: -16, marginBottom: 24,
+        }}
+      >
+        <Crosshair size={15} /> Wat is hier in de buurt?
       </button>
 
       {CATEGORY_ORDER.map(catKey => {
@@ -1367,7 +1404,9 @@ export default function Planner() {
   const archiveerEnStart = async (archiveren) => {
     if (archiveren) {
       try {
-        const r = await archiveTripStays(tripConfig, name);
+        // De planning meegeven, zodat wat je als bezocht hebt aangevinkt
+        // mee het logboek in gaat.
+        const r = await archiveTripStays(tripConfig, name, { plan, activityById });
         if (r.added > 0) {
           window.alert(
             `${r.added} ${r.added === 1 ? 'verblijf' : 'verblijven'} bewaard in het logboek.` +
@@ -1537,6 +1576,7 @@ export default function Planner() {
             onEditLocation={(act) => setSheet({ type: 'edit-location', activityId: act.id })}
             onOpenSuggestions={() => setSheet({ type: 'suggestions' })}
             onPasteLink={() => setSheet({ type: 'paste-link' })}
+            onInDeBuurt={() => setSheet({ type: 'in-de-buurt' })}
           />
         )}
 
@@ -1640,6 +1680,24 @@ export default function Planner() {
               coords: act.coords, note: act.note || null, custom: true,
             }]);
             setSheet(null);
+          }}
+          onClose={() => setSheet(null)}
+        />
+      )}
+
+      {sheet?.type === 'in-de-buurt' && (
+        <InDeBuurtSheet
+          days={days}
+          onCreate={(plek, dagKey) => {
+            // Meteen als bezocht: je staat er nu, dus je bent er geweest.
+            const id = `custom_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+            setCustomActivities(cs => [...cs, {
+              id, name: plek.name, category: plek.category, emoji: plek.emoji,
+              coords: plek.coords, note: plek.note, custom: true, visited: true,
+            }]);
+            if (dagKey) {
+              setPlan(p => ({ ...p, [dagKey]: [...(p[dagKey] || []), id] }));
+            }
           }}
           onClose={() => setSheet(null)}
         />

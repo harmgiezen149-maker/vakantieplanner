@@ -6,9 +6,10 @@ import { upload } from '@vercel/blob/client';
 import {
   ArrowLeft, Plus, Trash2, Star, MapPin, Camera, Loader2, X, ChevronDown,
   SlidersHorizontal, RefreshCw, Maximize2, Minimize2, Calendar as CalendarIcon,
-  Globe,
+  Globe, Check, Footprints,
 } from 'lucide-react';
-import { COLORS, formatDateRange } from '@/lib/data';
+import { COLORS, formatDateRange, DEFAULT_ACTIVITIES, applyLocationOverride } from '@/lib/data';
+import { bezoekPerVerblijf, voegBezoekToe } from '@/lib/bezoek';
 import { getPin } from '@/lib/maps';
 import LocationPicker from '@/components/LocationPicker';
 import ConflictMelding from '@/components/ConflictMelding';
@@ -543,6 +544,35 @@ export default function StayLog() {
   // Locatie wijzigen betekent: land opnieuw bepalen. Komt het land al mee uit
   // het zoekresultaat, dan is dat gratis; anders vragen we het na via reverse
   // geocoding en werken we het verblijf zo nodig een tweede keer bij.
+  // Haalt uit de lopende planning op wat je rond dit verblijf hebt aangevinkt
+  // als bezocht, en zet dat als momentopname op het verblijf. Bestaande regels
+  // blijven staan — daar kan de gebruiker iets aan hebben aangepast.
+  const haalBezoekOp = async (stay) => {
+    try {
+      const res = await fetch('/api/plan', {
+        headers: { 'X-Family-Pin': getPin() }, cache: 'no-store',
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      const perId = {};
+      for (const a of DEFAULT_ACTIVITIES) perId[a.id] = applyLocationOverride(a, data.locationOverrides || {});
+      for (const a of data.customActivities || []) perId[a.id] = a;
+
+      // Het verblijf uit het logboek heeft eigen datums; die zijn leidend.
+      const gevonden = bezoekPerVerblijf(data.plan || {}, perId, [stay])[stay.id] || [];
+      if (gevonden.length === 0) {
+        setError('Niets gevonden — vink activiteiten in de planner eerst aan als bezocht.');
+        setTimeout(() => setError(''), 4000);
+        return;
+      }
+      updateStay(stay.id, { bezocht: voegBezoekToe(stay.bezocht, gevonden) });
+    } catch {
+      setError('Kon de planning niet ophalen.');
+      setTimeout(() => setError(''), 4000);
+    }
+  };
+
   const setLocation = (id, loc) => {
     const direct = countryFromAddress(loc?.address);
     updateStay(id, {
@@ -965,6 +995,10 @@ export default function StayLog() {
               onBepaalLand={() => bepaalLand(stay)}
               onRemove={() => removeStay(stay)}
               onAddPhotos={(files) => addPhotos(stay.id, files)}
+              onBijwerkenBezoek={() => haalBezoekOp(stay)}
+              onVerwijderBezoek={(bezoekId) => updateStay(stay.id, {
+                bezocht: (stay.bezocht || []).filter(b => b.id !== bezoekId),
+              })}
               onRemovePhoto={(photo) => removePhoto(stay.id, photo)}
             />
           ))}
@@ -1396,6 +1430,7 @@ const ScorePicker = ({ value, onChange }) => (
 const StayCard = ({
   stay, selected, expanded, uploading, cardRef, reis,
   onToggle, onUpdate, onLocation, onBepaalLand, onRemove, onAddPhotos, onRemovePhoto,
+  onBijwerkenBezoek, onVerwijderBezoek,
 }) => {
   const fileRef = useRef(null);
   const period = formatDateRange(stay.startDate, stay.endDate) || stay.periodLabel || null;
@@ -1454,6 +1489,11 @@ const StayCard = ({
             title={stay.website}
             aria-label={`Website van ${stay.name}`}
           ><Globe size={14} /></a>
+        )}
+        {stay.bezocht?.length > 0 && (
+          <div style={{ ...S.photoCount, color: COLORS.moss }} title="Bezocht in de buurt">
+            <Footprints size={12} /> {stay.bezocht.length}
+          </div>
         )}
         {stay.photos?.length > 0 && (
           <div style={S.photoCount}><Camera size={12} /> {stay.photos.length}</div>
@@ -1557,6 +1597,43 @@ const StayCard = ({
             onChange={(e) => onUpdate({ review: e.target.value.slice(0, 2000) || null })}
             placeholder="Wat was er goed, wat viel tegen?"
           />
+
+          <label style={S.label}>
+            Bezocht in de buurt
+            {onBijwerkenBezoek && (
+              <button onClick={onBijwerkenBezoek} style={S.linkBtn} title="Ophalen uit de huidige planning">
+                <RefreshCw size={11} /> Bijwerken uit de planning
+              </button>
+            )}
+          </label>
+          {(stay.bezocht || []).length === 0 ? (
+            <p style={S.bezoekLeeg}>
+              Nog niets. Vink activiteiten in de planner aan als bezocht — bij
+              “Nieuwe vakantie starten” gaan ze mee hierheen, of haal ze nu op
+              met de knop hierboven.
+            </p>
+          ) : (
+            <ul style={S.bezoekLijst}>
+              {(stay.bezocht || []).map((b) => (
+                <li key={b.id} style={S.bezoekRegel}>
+                  <span style={S.bezoekEmoji}>{b.emoji || '📍'}</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={S.bezoekNaam}>{b.name}</span>
+                    {(b.datum || b.note) && (
+                      <span style={S.bezoekMeta}>
+                        {[b.datum && formatDateRange(b.datum, b.datum), b.note].filter(Boolean).join(' · ')}
+                      </span>
+                    )}
+                  </span>
+                  <button
+                    onClick={() => onVerwijderBezoek(b.id)}
+                    style={S.bezoekWis}
+                    aria-label={`${b.name} weghalen`}
+                  ><X size={13} /></button>
+                </li>
+              ))}
+            </ul>
+          )}
 
           <label style={S.label}>Foto's</label>
           <input
@@ -1739,6 +1816,20 @@ const S = {
   reisStip: {
     width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
     display: 'inline-block',
+  },
+  bezoekLeeg: { fontSize: 12.5, color: COLORS.inkLight, lineHeight: 1.5, margin: '0 0 4px' },
+  bezoekLijst: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 },
+  bezoekRegel: {
+    display: 'flex', alignItems: 'center', gap: 9,
+    background: COLORS.cream, border: `1px solid ${COLORS.hairline}`,
+    borderRadius: 10, padding: '8px 10px',
+  },
+  bezoekEmoji: { fontSize: 16 },
+  bezoekNaam: { display: 'block', fontSize: 13, fontWeight: 500, color: COLORS.charcoal },
+  bezoekMeta: { display: 'block', fontSize: 11, color: COLORS.inkLight, marginTop: 1 },
+  bezoekWis: {
+    border: 'none', background: 'transparent', cursor: 'pointer',
+    color: COLORS.inkLight, padding: 2, display: 'flex',
   },
   siteLink: {
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',

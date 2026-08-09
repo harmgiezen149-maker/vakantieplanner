@@ -38,6 +38,7 @@ reservekopieën in `backup.js`, het uitlezen van Maps-links in `maps.js`, het sa
 meldingen in `errorLog.js`, de versiecontrole in `conflict.js`, de cachesleutels in
 `geoCache.js`, de reisstatistiek in `reisverslag.js`, de deel-link in `delen.js`,
 het rekenwerk in `uitgaven.js`, de offline-kopie in `offline.js`,
+de bezoekkoppeling in `bezoek.js`,
 de CSV-import en de
 opschoning in `stayValidation.js`.
 
@@ -138,7 +139,7 @@ components/   Planner.jsx (planscherm), MapView.jsx, DayOverview.jsx,
   planner/    de sheets van het planscherm — zie hieronder
 lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
               (Maps-links + PIN), stayLog.js, stayTypes.js, backup.js, csv.js,
-              conflict.js, delen.js, errorLog.js, geoCache.js, packing.js,
+              bezoek.js, conflict.js, delen.js, errorLog.js, geoCache.js, packing.js,
               reisverslag.js, stayValidation.js, toegang.js, uitgaven.js,
               weer.js, offline.js, redis.js, useRoute.js, useWeer.js
 ```
@@ -159,6 +160,7 @@ components/planner/
   LocationEditSheet.jsx  locatie van een bestaande activiteit
   ConfirmSheet.jsx       bevestigingsvraag (met optionele derde knop)
   PasteLinkSheet.jsx     Google Maps-link plakken
+  InDeBuurtSheet.jsx     zoeken op je huidige locatie (GPS + /api/suggest)
   WhatsHereSheet.jsx     POI's rond een aangeklikt kaartpunt
   SuggestionsSheet.jsx   "Ontdek de omgeving" + HikingMap + SuggestionsMap (~1.480 r.)
 ```
@@ -184,7 +186,7 @@ Zeven losse Redis-documenten, elk één JSON-blob:
 | `planner:trip` | `{ plan, customActivities, locationOverrides, tripConfig, suggestExclusions, updatedAt, updatedBy }` |
 | `planner:inpakken` | `{ categories:[{id,name}], personen:[naam], items:[{id,categoryId,label,qty,checked,packed,important,note,person}], updatedBy, updatedAt }` |
 | `planner:checklist` | `{ checked:{}, updatedBy, updatedAt }` |
-| `planner:verblijven` | `{ stays:[{id,name,locationLabel,coords,type,typeOther,country,countryCode,startDate,endDate,periodLabel,tripTitle,score,review,photos,source}], updatedBy, updatedAt }` |
+| `planner:verblijven` | `{ stays:[{id,name,locationLabel,coords,type,typeOther,country,countryCode,startDate,endDate,periodLabel,website,tripTitle,score,review,photos,bezocht,source}], updatedBy, updatedAt }` |
 | `planner:fouten` | `{ fouten:[{bron,bericht,detail,pad,versie,aantal,eerst,laatst}], updatedAt }` — max 100 |
 | `planner:uitgaven` | `{ uitgaven:[{id,datum,bedrag,omschrijving,categorie,betaaldDoor,activityId}], personen:[naam], updatedBy, updatedAt }` |
 | `planner:delen` | `{ token, actief, aangemaakt, aangemaaktDoor, ingetrokken? }` — één link tegelijk |
@@ -402,6 +404,25 @@ camping rekent), en een verblijf **zonder cijfer telt wel mee als verblijf maar 
 het gemiddelde** — `null` is "nog niet beoordeeld", niet "een nul". Een reis over oud en
 nieuw verdeelt zijn nachten over beide jaren, maar telt als réis bij het jaar waarin hij
 eindigt; dat is dezelfde regel die de afgeleide naam ("aug 2026") gebruikt.
+
+**14b. Bezocht staat twee keer, en dat is met opzet.**
+Een activiteit krijgt `visited: true` in `planner:trip` (via `updateActivityProps`, dus
+custom → `customActivities`, ingebouwd → `locationOverrides`). Het verblijvenlogboek
+bewaart daarnáást een **momentopname** in `stay.bezocht`: naam, emoji, notitie, coords en
+datum. Geen verwijzing, een kopie — want `planner:trip` wordt gewist bij "nieuwe vakantie
+starten", en dát is precies het moment waarop je je terugblik wilt kunnen bekijken.
+Zelfde afweging als bij de foto's.
+
+`lib/bezoek.js` koppelt de twee: `bezoekPerVerblijf()` zoekt per verblijf de aangevinkte
+activiteiten waarvan de dag binnen de periode valt. Twee dingen die daarin vastliggen:
+een **wisseldag telt bij allebei** de verblijven (je bent er die dag allebei geweest), en
+een activiteit die op twee dagen staat levert **één regel met de vroegste datum** — je
+bent er niet twee keer voor het eerst geweest. `voegBezoekToe()` laat bestaande regels
+staan; daar kan de gebruiker iets aan hebben veranderd.
+
+Sorteren gebeurt met een kale `<`-vergelijking en **niet met `localeCompare`**: die
+sorteert leestekens naar eigen inzicht, waardoor een bezoek zonder datum vóór 2026 belandde
+in plaats van erachter.
 
 **15. Het land is afgeleid, niet ingetypt.**
 `STAY_TYPES` en de landhulpjes staan in `lib/stayTypes.js` — een module **zonder**
