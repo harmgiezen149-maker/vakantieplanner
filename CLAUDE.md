@@ -419,6 +419,17 @@ Aanvinken kan op drie plekken: op de chip in de planning, op `/dag`, en in de
 bibliotheek. Dat laatste is er omdat de planning lang niet altijd wordt gevolgd — je doet
 onderweg dingen die er niet in stonden.
 
+**En er is een vierde weg, die de planning helemaal overslaat.** Onder een verblijf staat
+"Zelf toevoegen" (`BezoekForm` in `StayLog.jsx`), want bij een camping uit 2003 valt er
+niets uit een planning te halen: die heeft nooit bestaan. `handmatigBezoek()` in
+`lib/bezoek.js` bouwt zo'n regel en geeft hem een id in een **eigen ruimte** (`hand_…`).
+Dat is het hele trucje: een `hand_`-id botst nooit met een `g_*` of `custom_*`, dus
+"Bijwerken uit de planning" laat de regel met rust in plaats van hem te overschrijven of
+er een tweede naast te zetten. Verder loopt alles langs dezelfde weg — `voegBezoekToe()`
+sorteert, `updateStay()` slaat op, dus debounce, versiecontrole en botsingsbalk gelden
+vanzelf. De opschoning in `sanitizeStay()` kende deze vorm al; er hoefde niets aan de API
+of het datamodel te veranderen.
+
 **`/dag` was tot dan toe alleen-lezen en is dat nu niet meer.** Daar hoorden drie dingen
 bij, en die moeten blijven staan: de PUT stuurt `tripConfig` en `suggestExclusions`
 bewust **niet** mee zodat de route ze uit de opgeslagen staat terughaalt (valkuil 3),

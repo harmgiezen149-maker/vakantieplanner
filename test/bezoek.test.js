@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  dagBinnenVerblijf, bezoekPerVerblijf, maakBezoek, voegBezoekToe,
+  dagBinnenVerblijf, bezoekPerVerblijf, maakBezoek, voegBezoekToe, handmatigBezoek,
 } from '../lib/bezoek.js';
 
 const stay = (o) => ({ id: o.id || 's1', name: o.name || 'Camping', ...o });
@@ -145,4 +145,56 @@ test('bezoeken zonder datum komen achteraan', () => {
 test('lege invoer geeft een lege lijst', () => {
   assert.deepEqual(voegBezoekToe(null, null), []);
   assert.deepEqual(voegBezoekToe([], [{ naamloos: true }]), [], 'zonder id geen regel');
+});
+
+// ── Zelf toevoegen ──────────────────────────────────────────────────
+
+test('een handmatig bezoek krijgt een eigen id', () => {
+  const b = handmatigBezoek({ name: 'Kasteel van Bouillon' });
+  assert.match(b.id, /^hand_/, 'eigen ruimte, botst niet met een activiteit-id');
+  assert.equal(b.name, 'Kasteel van Bouillon');
+});
+
+test('twee handmatige bezoeken achter elkaar krijgen verschillende ids', () => {
+  const ids = new Set(
+    Array.from({ length: 200 }, () => handmatigBezoek({ name: 'x' }).id));
+  assert.equal(ids.size, 200, 'binnen dezelfde milliseconde mogen ze niet samenvallen');
+});
+
+test('een handmatig bezoek wordt net zo opgeschoond als een bezoek uit de planning', () => {
+  const b = handmatigBezoek({
+    name: 'N'.repeat(200), emoji: '🏰', category: 'culture',
+    note: 'x'.repeat(500), coords: [49.79, 5.06], datum: '2003-07-14',
+  });
+  assert.equal(b.name.length, 90);
+  assert.equal(b.note.length, 300);
+  assert.deepEqual(b.coords, [49.79, 5.06]);
+  assert.equal(b.datum, '2003-07-14');
+  assert.equal(b.emoji, '🏰');
+  assert.equal(b.category, 'culture');
+});
+
+test('zonder bruikbare invoer blijft er een nette lege regel over', () => {
+  const b = handmatigBezoek({ datum: 'zomer 2003', coords: [49.79] });
+  assert.equal(b.name, 'Activiteit');
+  assert.equal(b.datum, null, 'geen ISO-datum, dus geen datum');
+  assert.equal(b.coords, null, 'één getal is geen coördinaat');
+  assert.match(b.id, /^hand_/, 'wel altijd een id — zonder id slaat voegBezoekToe hem over');
+});
+
+test('een handmatig bezoek komt in de lijst tussen de rest op datum', () => {
+  const bestaand = [
+    { id: 'a1', name: 'Meer', datum: '2003-07-10' },
+    { id: 'a2', name: 'Markt', datum: '2003-07-20' },
+  ];
+  const uit = voegBezoekToe(bestaand, [handmatigBezoek({ name: 'Kasteel', datum: '2003-07-14' })]);
+  assert.deepEqual(uit.map(b => b.name), ['Meer', 'Kasteel', 'Markt']);
+});
+
+test('bijwerken uit de planning laat een handmatige regel staan', () => {
+  const hand = handmatigBezoek({ name: 'Kasteel', datum: '2026-08-11' });
+  const uitPlanning = bezoekPerVerblijf({ '2026-08-10': ['a1'] }, acts, stays).s1;
+  const uit = voegBezoekToe([hand], uitPlanning);
+  assert.deepEqual(uit.map(b => b.name), ['Meer', 'Kasteel']);
+  assert.equal(uit.filter(b => b.name === 'Kasteel').length, 1, 'en niet dubbel');
 });

@@ -8,8 +8,10 @@ import {
   SlidersHorizontal, RefreshCw, Maximize2, Minimize2, Calendar as CalendarIcon,
   Globe, Check, Footprints,
 } from 'lucide-react';
-import { COLORS, formatDateRange, DEFAULT_ACTIVITIES, applyLocationOverride } from '@/lib/data';
-import { bezoekPerVerblijf, voegBezoekToe } from '@/lib/bezoek';
+import {
+  COLORS, formatDateRange, DEFAULT_ACTIVITIES, applyLocationOverride, CATEGORIES,
+} from '@/lib/data';
+import { bezoekPerVerblijf, voegBezoekToe, handmatigBezoek } from '@/lib/bezoek';
 import { getPin } from '@/lib/maps';
 import LocationPicker from '@/components/LocationPicker';
 import ConflictMelding from '@/components/ConflictMelding';
@@ -573,6 +575,15 @@ export default function StayLog() {
     }
   };
 
+  // Een bezoek dat niet uit de planning komt. Loopt langs dezelfde weg als de
+  // rest — voegBezoekToe zorgt voor de sortering, updateStay voor het opslaan,
+  // dus debounce, versiecontrole en de botsingsbalk gelden vanzelf.
+  const voegHandmatigBezoekToe = (stay, velden) => {
+    updateStay(stay.id, {
+      bezocht: voegBezoekToe(stay.bezocht, [handmatigBezoek(velden)]),
+    });
+  };
+
   const setLocation = (id, loc) => {
     const direct = countryFromAddress(loc?.address);
     updateStay(id, {
@@ -996,6 +1007,7 @@ export default function StayLog() {
               onRemove={() => removeStay(stay)}
               onAddPhotos={(files) => addPhotos(stay.id, files)}
               onBijwerkenBezoek={() => haalBezoekOp(stay)}
+              onVoegBezoekToe={(velden) => voegHandmatigBezoekToe(stay, velden)}
               onVerwijderBezoek={(bezoekId) => updateStay(stay.id, {
                 bezocht: (stay.bezocht || []).filter(b => b.id !== bezoekId),
               })}
@@ -1303,6 +1315,119 @@ const TypeSelect = ({ value, onChange, other, onOther }) => (
   </>
 );
 
+// ── Zelf een bezoek toevoegen ───────────────────────────────────────
+// Voor een camping uit 2003 valt er niets uit de planning te halen — die
+// planning heeft nooit bestaan. Dit is dan de enige weg naar binnen.
+//
+// Bewust klein: alleen de naam moet. De soort levert de emoji (en vult meteen
+// `category`, het veld dat het datamodel al kent), de rest is optioneel. Het
+// formulier blijft na opslaan openstaan met lege velden, want wie een oude
+// vakantie invult typt er zelden maar één.
+
+const BezoekForm = ({ onSave, onSluit }) => {
+  const [naam, setNaam] = useState('');
+  const [cat, setCat] = useState('custom');
+  const [datum, setDatum] = useState('');
+  const [note, setNote] = useState('');
+  const [plaats, setPlaats] = useState(null);
+  const [toonLocatie, setToonLocatie] = useState(false);
+  const [err, setErr] = useState('');
+
+  const submit = () => {
+    const n = naam.trim();
+    if (!n) {
+      setErr('Geef de activiteit een naam.');
+      return;
+    }
+    onSave({
+      name: n,
+      emoji: CATEGORIES[cat]?.emoji || null,
+      category: cat,
+      note: note.trim() || null,
+      datum: datum || null,
+      coords: plaats?.coords || null,
+    });
+    setNaam(''); setCat('custom'); setDatum(''); setNote('');
+    setPlaats(null); setToonLocatie(false); setErr('');
+  };
+
+  return (
+    <div style={S.bezoekForm}>
+      <input
+        style={S.input}
+        value={naam}
+        onChange={(e) => { setNaam(e.target.value.slice(0, 90)); setErr(''); }}
+        onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+        placeholder="Wat heb je gedaan? Bv. Kasteel van Bouillon"
+        autoFocus
+      />
+
+      <div style={S.bezoekVeldLabel}>
+        Soort <span style={{ color: COLORS.ink }}>· {CATEGORIES[cat]?.name}</span>
+      </div>
+      <div style={S.chipRow}>
+        {Object.entries(CATEGORIES).map(([id, c]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setCat(id)}
+            title={c.name}
+            aria-label={c.name}
+            aria-pressed={cat === id}
+            style={{
+              ...S.emojiChip,
+              background: cat === id ? `${c.color}1F` : 'transparent',
+              borderColor: cat === id ? c.color : COLORS.hairline,
+            }}
+          >{c.emoji}</button>
+        ))}
+      </div>
+
+      <div style={S.bezoekVeldLabel}>Wanneer <span style={S.optioneel}>· mag leeg</span></div>
+      <input
+        type="date"
+        style={S.input}
+        value={datum}
+        onChange={(e) => setDatum(e.target.value)}
+      />
+
+      <div style={S.bezoekVeldLabel}>Notitie <span style={S.optioneel}>· mag leeg</span></div>
+      <input
+        style={S.input}
+        value={note}
+        onChange={(e) => setNote(e.target.value.slice(0, 300))}
+        placeholder="Bv. mooi uitzicht, druk"
+      />
+
+      {/* Locatie zit ingeklapt: de meeste regels zijn “we zijn er geweest”
+          zonder dat er een speld bij hoeft. */}
+      {toonLocatie ? (
+        <>
+          <div style={S.bezoekVeldLabel}>Locatie <span style={S.optioneel}>· mag leeg</span></div>
+          <LocationPicker
+            value={plaats}
+            onChange={setPlaats}
+            placeholder="Zoek een plek of plak een Maps-link"
+          />
+        </>
+      ) : (
+        <button type="button" onClick={() => setToonLocatie(true)} style={S.bezoekLocatieLink}>
+          <MapPin size={12} /> Locatie erbij
+        </button>
+      )}
+
+      {err && <div style={S.formErr}>{err}</div>}
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <button style={S.bezoekOpslaan} onClick={submit} aria-label="Bezoek toevoegen">
+          <Plus size={14} /> Toevoegen
+        </button>
+        <button style={S.bezoekKlaar} onClick={onSluit}>Klaar</button>
+      </div>
+    </div>
+  );
+};
+
 // ── Filterbalk ──────────────────────────────────────────────────────
 
 const FilterBar = ({
@@ -1430,9 +1555,10 @@ const ScorePicker = ({ value, onChange }) => (
 const StayCard = ({
   stay, selected, expanded, uploading, cardRef, reis,
   onToggle, onUpdate, onLocation, onBepaalLand, onRemove, onAddPhotos, onRemovePhoto,
-  onBijwerkenBezoek, onVerwijderBezoek,
+  onBijwerkenBezoek, onVerwijderBezoek, onVoegBezoekToe,
 }) => {
   const fileRef = useRef(null);
+  const [bezoekOpen, setBezoekOpen] = useState(false);
   const period = formatDateRange(stay.startDate, stay.endDate) || stay.periodLabel || null;
   const typeLabel = stayTypeLabel(stay);
   const landLabel = stay.country
@@ -1610,7 +1736,8 @@ const StayCard = ({
             <p style={S.bezoekLeeg}>
               Nog niets. Vink activiteiten in de planner aan als bezocht — bij
               “Nieuwe vakantie starten” gaan ze mee hierheen, of haal ze nu op
-              met de knop hierboven.
+              met de knop hierboven. Bij een vakantie van vroeger is er geen
+              planning: zet ze er dan zelf bij.
             </p>
           ) : (
             <ul style={S.bezoekLijst}>
@@ -1633,6 +1760,16 @@ const StayCard = ({
                 </li>
               ))}
             </ul>
+          )}
+
+          {onVoegBezoekToe && (
+            bezoekOpen ? (
+              <BezoekForm onSave={onVoegBezoekToe} onSluit={() => setBezoekOpen(false)} />
+            ) : (
+              <button onClick={() => setBezoekOpen(true)} style={S.bezoekToevoeg}>
+                <Plus size={13} /> Zelf toevoegen
+              </button>
+            )
           )}
 
           <label style={S.label}>Foto's</label>
@@ -1830,6 +1967,50 @@ const S = {
   bezoekWis: {
     border: 'none', background: 'transparent', cursor: 'pointer',
     color: COLORS.inkLight, padding: 2, display: 'flex',
+  },
+  bezoekToevoeg: {
+    display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 8,
+    padding: '7px 12px', borderRadius: 999,
+    borderWidth: 1, borderStyle: 'dashed', borderColor: `${COLORS.lake}80`,
+    background: 'transparent', color: COLORS.lake,
+    fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600,
+    cursor: 'pointer',
+  },
+  bezoekForm: {
+    marginTop: 10, padding: 12, borderRadius: 12,
+    background: COLORS.creamSoft,
+    borderWidth: 1, borderStyle: 'dashed', borderColor: `${COLORS.lake}80`,
+  },
+  bezoekVeldLabel: {
+    fontSize: 11, color: COLORS.inkLight, fontWeight: 600,
+    letterSpacing: 0.4, textTransform: 'uppercase', margin: '12px 0 6px',
+  },
+  optioneel: { textTransform: 'none', letterSpacing: 0, fontWeight: 400 },
+  emojiChip: {
+    width: 38, height: 34, borderRadius: 10, cursor: 'pointer',
+    borderWidth: 1, borderStyle: 'solid',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: 17, lineHeight: 1, padding: 0,
+  },
+  bezoekLocatieLink: {
+    display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 12,
+    background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
+    color: COLORS.lake, fontFamily: "'DM Sans', sans-serif",
+    fontSize: 12.5, fontWeight: 600, textDecoration: 'underline',
+  },
+  bezoekOpslaan: {
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    padding: '9px 15px', borderRadius: 999, border: 'none',
+    background: COLORS.forest, color: COLORS.cream,
+    fontFamily: "'DM Sans', sans-serif", fontSize: 13.5, fontWeight: 600,
+    cursor: 'pointer',
+  },
+  bezoekKlaar: {
+    padding: '9px 15px', borderRadius: 999,
+    borderWidth: 1, borderStyle: 'solid', borderColor: COLORS.hairline,
+    background: 'transparent', color: COLORS.ink,
+    fontFamily: "'DM Sans', sans-serif", fontSize: 13.5, fontWeight: 600,
+    cursor: 'pointer',
   },
   siteLink: {
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
