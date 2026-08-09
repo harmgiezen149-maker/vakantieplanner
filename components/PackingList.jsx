@@ -10,6 +10,7 @@ import {
   setPacked as pakSetPacked,
   changeQty as pakChangeQty,
 } from '@/lib/packing';
+import { COLORS } from '@/lib/data';
 
 // Unieke id-generator (geen externe dependency nodig)
 const uid = () =>
@@ -786,7 +787,7 @@ export default function PackingList() {
                               type="checkbox"
                               checked={!!it.important}
                               onChange={() => toggleImportant(it.id)}
-                              style={{ width: 16, height: 16, accentColor: '#C97D5D' }}
+                              style={{ width: 16, height: 16, accentColor: COLORS.sunset }}
                             />
                             Belangrijk markeren
                           </label>
@@ -854,11 +855,17 @@ export default function PackingList() {
   );
 }
 
-// ── Styling (zelfde tokens als de auto-checklist) ──────────────────────
-const teal = '#0f766e';
-const tealSoft = '#ccfbf1';
-const ink = '#1c1917';
-const paper = '#faf8f3';
+// ── Styling ──────────────────────────────────────────────────────────
+// De tokens wijzen naar het huispalet uit lib/data.js. Deze twee lijstpagina's
+// hadden lang hun eigen kleuren (een mint-teal op bijna-wit) en vielen daardoor
+// uit de toon bij de rest van de app.
+const teal = COLORS.lake;
+const tealSoft = 'rgba(58, 126, 132, 0.12)';
+const amber = COLORS.sunset;
+const ink = COLORS.charcoal;
+const paper = COLORS.cream;      // paginakleur
+const kaart = COLORS.creamSoft;  // kaarten en invoervelden erop
+const lijn = COLORS.hairline;
 
 const globalCss = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600&display=swap');
@@ -939,53 +946,53 @@ const S = {
   page: {
     fontFamily: "'DM Sans', sans-serif", background: paper, color: ink,
     minHeight: '100vh', maxWidth: 640, margin: '0 auto', padding: '24px 18px 64px',
-    backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(15,118,110,0.06) 1px, transparent 0)',
+    backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(58,126,132,0.07) 1px, transparent 0)',
     backgroundSize: '22px 22px',
   },
   header: { marginBottom: 24 },
   backLink: { display: 'inline-block', marginBottom: 14, fontSize: 13, fontWeight: 600, color: teal, textDecoration: 'none', padding: '6px 12px 6px 10px', background: tealSoft, borderRadius: 99 },
   kicker: { fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase', color: teal, fontWeight: 600, margin: '0 0 6px' },
   title: { fontFamily: "'Fraunces', serif", fontSize: 34, fontWeight: 700, lineHeight: 1.05, margin: '0 0 8px' },
-  sub: { fontSize: 15, lineHeight: 1.5, color: '#57534e', margin: '0 0 20px' },
+  sub: { fontSize: 15, lineHeight: 1.5, color: COLORS.ink, margin: '0 0 20px' },
   soloLink: {
     textDecoration: 'none', fontSize: 14, padding: '2px 6px',
     borderRadius: 8, lineHeight: 1,
   },
   sectionTitleInput: {
     fontFamily: "'Fraunces', serif", fontSize: 19, fontWeight: 500,
-    color: '#2D4F3E', background: 'transparent', border: '1px solid transparent',
+    color: COLORS.forest, background: 'transparent', border: '1px solid transparent',
     borderRadius: 8, padding: '2px 6px', margin: '-2px -6px', flex: 'none',
     maxWidth: 200, cursor: 'text',
   },
-  starOn: { color: '#C97D5D', fontSize: 14, marginRight: 2, flexShrink: 0 },
-  noteDot: { color: '#3A7E84', fontSize: 12 },
+  starOn: { color: COLORS.sunset, fontSize: 14, marginRight: 2, flexShrink: 0 },
+  noteDot: { color: COLORS.lake, fontSize: 12 },
   expandBtn: {
     width: 30, height: 30, border: 'none', borderRadius: 8,
-    background: 'transparent', color: '#8a8478', fontSize: 14,
+    background: 'transparent', color: COLORS.inkLight, fontSize: 14,
     cursor: 'pointer', flexShrink: 0, lineHeight: 1,
   },
-  expandBtnOn: { background: '#efe9dd', color: '#2D4F3E' },
+  expandBtnOn: { background: lijn, color: COLORS.forest },
   editPanel: {
     margin: '2px 0 10px', padding: '12px 14px',
-    background: '#f4efe4', borderRadius: 12,
+    background: paper, borderRadius: 12,
     display: 'flex', flexDirection: 'column',
   },
   editLabel: {
-    fontSize: 11, fontWeight: 600, color: '#8a8478',
+    fontSize: 11, fontWeight: 600, color: COLORS.inkLight,
     textTransform: 'uppercase', letterSpacing: '0.05em',
     margin: '8px 0 4px',
   },
   editInput: {
     fontFamily: 'inherit', fontSize: 14, padding: '9px 11px',
-    border: '1px solid #e7e2d8', borderRadius: 10,
-    background: '#fff', color: ink, width: '100%', boxSizing: 'border-box',
+    border: `1px solid ${lijn}`, borderRadius: 10,
+    background: kaart, color: ink, width: '100%', boxSizing: 'border-box',
   },
   editDelete: {
     marginTop: 14, alignSelf: 'flex-start',
     fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
     padding: '8px 14px', borderRadius: 10, cursor: 'pointer',
-    background: 'transparent', color: '#b4452f',
-    border: '1px solid #e3c4ba',
+    background: 'transparent', color: '#B5443B',
+    border: `1px solid rgba(181, 68, 59, 0.30)`,
   },
   resetBtn: {
     fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
@@ -993,68 +1000,68 @@ const S = {
     background: 'transparent', color: teal,
     border: `1px solid ${teal}`, borderRadius: 999, cursor: 'pointer',
   },
-  importHint: { fontSize: 12, lineHeight: 1.5, color: '#8a8478', margin: '-8px 0 16px' },
+  importHint: { fontSize: 12, lineHeight: 1.5, color: COLORS.inkLight, margin: '-8px 0 16px' },
   progressWrap: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 },
   progressTrack: { flex: 1, height: 10, background: tealSoft, borderRadius: 999, overflow: 'hidden' },
   progressFill: { height: '100%', background: teal, borderRadius: 999, transition: 'width 0.35s ease' },
   progressLabel: { fontSize: 13, fontWeight: 600, color: teal, whiteSpace: 'nowrap' },
   nameRow: { display: 'flex', flexDirection: 'column', gap: 6 },
-  nameInput: { fontFamily: 'inherit', fontSize: 14, padding: '10px 12px', border: '1px solid #e7e2d8', borderRadius: 10, background: '#fff', color: ink },
-  saveState: { fontSize: 12, color: '#a8a29e', minHeight: 16 },
-  loading: { color: '#a8a29e', fontStyle: 'italic' },
-  empty: { color: '#a8a29e', fontStyle: 'italic', lineHeight: 1.5, marginTop: 0 },
+  nameInput: { fontFamily: 'inherit', fontSize: 14, padding: '10px 12px', border: `1px solid ${lijn}`, borderRadius: 10, background: kaart, color: ink },
+  saveState: { fontSize: 12, color: COLORS.inkLight, minHeight: 16 },
+  loading: { color: COLORS.inkLight, fontStyle: 'italic' },
+  empty: { color: COLORS.inkLight, fontStyle: 'italic', lineHeight: 1.5, marginTop: 0 },
   sections: { display: 'flex', flexDirection: 'column', gap: 22 },
-  filterBar: { display: 'flex', flexDirection: 'column', gap: 10, padding: '14px', background: '#fff', border: '1px solid #ece7dd', borderRadius: 14 },
+  filterBar: { display: 'flex', flexDirection: 'column', gap: 10, padding: '14px', background: kaart, border: `1px solid ${lijn}`, borderRadius: 14 },
   filterChips: { display: 'flex', flexWrap: 'wrap', gap: 6 },
-  filterChip: { fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '6px 12px', borderRadius: 99, borderWidth: 1, borderStyle: 'solid', borderColor: '#e0dad0', background: paper, color: '#57534e', cursor: 'pointer' },
-  filterChipOn: { background: teal, borderColor: teal, color: '#fff' },
+  filterChip: { fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '6px 12px', borderRadius: 99, borderWidth: 1, borderStyle: 'solid', borderColor: lijn, background: paper, color: COLORS.ink, cursor: 'pointer' },
+  filterChipOn: { background: teal, borderColor: teal, color: kaart },
   persoonTag: { marginLeft: 6, fontSize: 10.5, fontWeight: 600, color: teal, background: tealSoft, padding: '1px 7px', borderRadius: 99, whiteSpace: 'nowrap' },
   persoonBalk: { marginBottom: 14 },
   persoonRij: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' },
-  persoonBeheer: { fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600, padding: '6px 12px', borderRadius: 99, borderWidth: 1, borderStyle: 'dashed', borderColor: '#e0dad0', background: 'transparent', color: '#8a8378', cursor: 'pointer' },
-  persoonPaneel: { marginTop: 10, padding: 12, background: paper, border: '1px solid #e0dad0', borderRadius: 12 },
-  persoonUitleg: { fontSize: 12.5, color: '#8a8378', lineHeight: 1.5, margin: '0 0 10px' },
-  persoonToevoegen: { fontFamily: 'inherit', fontSize: 13, fontWeight: 700, padding: '8px 16px', borderRadius: 10, border: 'none', background: teal, color: '#fff', cursor: 'pointer' },
+  persoonBeheer: { fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600, padding: '6px 12px', borderRadius: 99, borderWidth: 1, borderStyle: 'dashed', borderColor: lijn, background: 'transparent', color: COLORS.inkLight, cursor: 'pointer' },
+  persoonPaneel: { marginTop: 10, padding: 12, background: paper, border: `1px solid ${lijn}`, borderRadius: 12 },
+  persoonUitleg: { fontSize: 12.5, color: COLORS.inkLight, lineHeight: 1.5, margin: '0 0 10px' },
+  persoonToevoegen: { fontFamily: 'inherit', fontSize: 13, fontWeight: 700, padding: '8px 16px', borderRadius: 10, border: 'none', background: teal, color: kaart, cursor: 'pointer' },
   persoonLijst: { listStyle: 'none', margin: '10px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 6 },
   persoonRegel: { display: 'flex', alignItems: 'center', gap: 10, fontSize: 13.5, padding: '6px 2px' },
   persoonLink: { fontSize: 12, color: teal, fontWeight: 600, textDecoration: 'none' },
-  persoonWis: { border: 'none', background: 'transparent', color: '#cbb9b0', fontSize: 12, cursor: 'pointer', padding: 2 },
-  hideToggle: { fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '8px 12px', borderRadius: 10, borderWidth: 1, borderStyle: 'solid', borderColor: '#e0dad0', background: paper, color: '#57534e', cursor: 'pointer', textAlign: 'left' },
+  persoonWis: { border: 'none', background: 'transparent', color: COLORS.inkLight, fontSize: 12, cursor: 'pointer', padding: 2 },
+  hideToggle: { fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '8px 12px', borderRadius: 10, borderWidth: 1, borderStyle: 'solid', borderColor: lijn, background: paper, color: COLORS.ink, cursor: 'pointer', textAlign: 'left' },
   hideToggleOn: { background: tealSoft, borderColor: tealSoft, color: teal },
   section: {},
   sectionHead: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, paddingBottom: 6, borderBottom: `2px solid ${tealSoft}` },
   sectionTitle: { fontFamily: "'Fraunces', serif", fontSize: 19, fontWeight: 600, margin: 0, flex: 1 },
-  sectionCount: { fontSize: 13, fontWeight: 600, color: '#a8a29e' },
-  catDelete: { border: 'none', background: 'transparent', color: '#cbb9b0', fontSize: 14, cursor: 'pointer', padding: 4, lineHeight: 1 },
+  sectionCount: { fontSize: 13, fontWeight: 600, color: COLORS.inkLight },
+  catDelete: { border: 'none', background: 'transparent', color: COLORS.inkLight, fontSize: 14, cursor: 'pointer', padding: 4, lineHeight: 1 },
   reorder: { display: 'flex', gap: 2 },
-  reorderBtn: { width: 26, height: 26, borderRadius: 7, border: '1px solid #e0dad0', background: paper, color: teal, fontSize: 14, fontWeight: 700, cursor: 'pointer', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  reorderBtnOff: { color: '#d6cfc3', cursor: 'default' },
+  reorderBtn: { width: 26, height: 26, borderRadius: 7, border: `1px solid ${lijn}`, background: paper, color: teal, fontSize: 14, fontWeight: 700, cursor: 'pointer', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  reorderBtnOff: { color: lijn, cursor: 'default' },
   list: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 },
-  item: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: '#fff', border: '1px solid #ece7dd', borderRadius: 12, transition: 'background 0.15s, border-color 0.15s' },
-  itemOn: { background: '#f0fdfa', borderColor: tealSoft },
-  box: { flexShrink: 0, width: 22, height: 22, borderRadius: 6, border: '2px solid #cbd5cf', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: '#fff', background: '#fff', cursor: 'pointer', transition: 'all 0.15s' },
+  item: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: kaart, border: `1px solid ${lijn}`, borderRadius: 12, transition: 'background 0.15s, border-color 0.15s' },
+  itemOn: { background: tealSoft, borderColor: tealSoft },
+  box: { flexShrink: 0, width: 22, height: 22, borderRadius: 6, border: `2px solid ${lijn}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: kaart, background: kaart, cursor: 'pointer', transition: 'all 0.15s' },
   boxOn: { background: teal, borderColor: teal },
   label: { fontSize: 14.5, lineHeight: 1.3, color: ink, flex: 1 },
-  labelOn: { color: '#57534e', textDecoration: 'line-through', textDecorationColor: '#a7d3cd' },
-  labelSkipped: { color: '#a8a29e', textDecoration: 'line-through', textDecorationColor: '#c9a17d', fontStyle: 'italic' },
-  skipTag: { fontSize: 11, color: '#c9a17d', fontStyle: 'italic', fontWeight: 600 },
+  labelOn: { color: COLORS.ink, textDecoration: 'line-through', textDecorationColor: tealSoft },
+  labelSkipped: { color: COLORS.inkLight, textDecoration: 'line-through', textDecorationColor: COLORS.wood, fontStyle: 'italic' },
+  skipTag: { fontSize: 11, color: COLORS.wood, fontStyle: 'italic', fontWeight: 600 },
   qtyWrap: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 },
   packedWrap: { display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 },
   packedInput: {
     width: 34, textAlign: 'center', fontFamily: 'inherit', fontSize: 13,
-    padding: '5px 2px', border: '1px solid #d9c9a8', borderRadius: 8,
-    background: '#fdf9ee', color: '#8a6d1f', fontWeight: 600,
+    padding: '5px 2px', border: `1px solid rgba(139, 111, 71, 0.35)`, borderRadius: 8,
+    background: kaart, color: COLORS.wood, fontWeight: 600,
     MozAppearance: 'textfield',
   },
-  packedSep: { fontSize: 12, color: '#8a8478', marginLeft: 2 },
-  qtyBtn: { width: 26, height: 26, borderRadius: 7, border: '1px solid #e0dad0', background: '#faf8f3', color: teal, fontSize: 16, fontWeight: 600, cursor: 'pointer', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  packedSep: { fontSize: 12, color: COLORS.inkLight, marginLeft: 2 },
+  qtyBtn: { width: 26, height: 26, borderRadius: 7, border: `1px solid ${lijn}`, background: paper, color: teal, fontSize: 16, fontWeight: 600, cursor: 'pointer', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' },
   qtyNum: { minWidth: 22, textAlign: 'center', fontSize: 14, fontWeight: 600, color: ink },
   itemDelete: { border: 'none', background: 'transparent', fontSize: 14, cursor: 'pointer', padding: 2, opacity: 0.55, flexShrink: 0 },
   addItemRow: { display: 'flex', gap: 6, marginTop: 8 },
-  addItemInput: { flex: 1, fontFamily: 'inherit', fontSize: 14, padding: '9px 11px', border: '1px solid #e7e2d8', borderRadius: 10, background: '#fff', color: ink },
-  addQtyInput: { width: 58, fontFamily: 'inherit', fontSize: 14, padding: '9px 8px', border: '1px solid #e7e2d8', borderRadius: 10, background: '#fff', color: ink, textAlign: 'center' },
+  addItemInput: { flex: 1, fontFamily: 'inherit', fontSize: 14, padding: '9px 11px', border: `1px solid ${lijn}`, borderRadius: 10, background: kaart, color: ink },
+  addQtyInput: { width: 58, fontFamily: 'inherit', fontSize: 14, padding: '9px 8px', border: `1px solid ${lijn}`, borderRadius: 10, background: kaart, color: ink, textAlign: 'center' },
   addItemBtn: { width: 42, border: 'none', borderRadius: 10, background: tealSoft, color: teal, fontSize: 20, fontWeight: 600, cursor: 'pointer', lineHeight: 1 },
-  addCatCard: { display: 'flex', gap: 8, padding: '14px', background: '#fff', border: '1px dashed #d6cfc3', borderRadius: 14, marginTop: 4 },
-  addCatInput: { flex: 1, fontFamily: 'inherit', fontSize: 14, padding: '10px 12px', border: '1px solid #e7e2d8', borderRadius: 10, background: paper, color: ink },
-  addCatBtn: { border: 'none', borderRadius: 10, background: teal, color: '#fff', fontSize: 14, fontWeight: 600, padding: '0 16px', cursor: 'pointer', whiteSpace: 'nowrap' },
+  addCatCard: { display: 'flex', gap: 8, padding: '14px', background: kaart, border: `1px dashed ${lijn}`, borderRadius: 14, marginTop: 4 },
+  addCatInput: { flex: 1, fontFamily: 'inherit', fontSize: 14, padding: '10px 12px', border: `1px solid ${lijn}`, borderRadius: 10, background: paper, color: ink },
+  addCatBtn: { border: 'none', borderRadius: 10, background: teal, color: kaart, fontSize: 14, fontWeight: 600, padding: '0 16px', cursor: 'pointer', whiteSpace: 'nowrap' },
 };

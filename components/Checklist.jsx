@@ -3,6 +3,7 @@
 import ConflictMelding from '@/components/ConflictMelding';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { COLORS } from '@/lib/data';
 
 // ── De checklist-inhoud ──────────────────────────────────────────────
 // Per sectie een groep items. id moet uniek + stabiel blijven (wordt als
@@ -274,11 +275,16 @@ export default function Checklist() {
 }
 
 // ── Styling ──────────────────────────────────────────────────────────
-const teal = '#0f766e';
-const tealSoft = '#ccfbf1';
-const amber = '#b45309';
-const ink = '#1c1917';
-const paper = '#faf8f3';
+// De tokens wijzen naar het huispalet uit lib/data.js. Deze twee lijstpagina's
+// hadden lang hun eigen kleuren (een mint-teal op bijna-wit) en vielen daardoor
+// uit de toon bij de rest van de app.
+const teal = COLORS.lake;
+const tealSoft = 'rgba(58, 126, 132, 0.12)';
+const amber = COLORS.sunset;
+const ink = COLORS.charcoal;
+const paper = COLORS.cream;      // paginakleur
+const kaart = COLORS.creamSoft;  // kaarten en invoervelden erop
+const lijn = COLORS.hairline;
 
 const globalCss = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600&display=swap');
@@ -296,7 +302,7 @@ const styles = {
     margin: '0 auto',
     padding: '24px 18px 64px',
     backgroundImage:
-      'radial-gradient(circle at 1px 1px, rgba(15,118,110,0.06) 1px, transparent 0)',
+      'radial-gradient(circle at 1px 1px, rgba(58,126,132,0.07) 1px, transparent 0)',
     backgroundSize: '22px 22px',
   },
   header: { marginBottom: 28 },
@@ -313,7 +319,7 @@ const styles = {
     fontFamily: "'Fraunces', serif", fontSize: 34, fontWeight: 700,
     lineHeight: 1.05, margin: '0 0 8px',
   },
-  sub: { fontSize: 15, lineHeight: 1.5, color: '#57534e', margin: '0 0 20px' },
+  sub: { fontSize: 15, lineHeight: 1.5, color: COLORS.ink, margin: '0 0 20px' },
   resetBtn: {
     fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
     padding: '8px 14px', marginBottom: 16,
@@ -332,10 +338,10 @@ const styles = {
   nameRow: { display: 'flex', flexDirection: 'column', gap: 6 },
   nameInput: {
     fontFamily: 'inherit', fontSize: 14, padding: '10px 12px',
-    border: '1px solid #e7e2d8', borderRadius: 10, background: '#fff', color: ink,
+    border: `1px solid ${lijn}`, borderRadius: 10, background: kaart, color: ink,
   },
-  saveState: { fontSize: 12, color: '#a8a29e', minHeight: 16 },
-  loading: { color: '#a8a29e', fontStyle: 'italic' },
+  saveState: { fontSize: 12, color: COLORS.inkLight, minHeight: 16 },
+  loading: { color: COLORS.inkLight, fontStyle: 'italic' },
   sections: { display: 'flex', flexDirection: 'column', gap: 22 },
   section: {},
   sectionHead: {
@@ -345,27 +351,27 @@ const styles = {
   sectionTitle: {
     fontFamily: "'Fraunces', serif", fontSize: 19, fontWeight: 600, margin: 0,
   },
-  sectionCount: { fontSize: 13, fontWeight: 600, color: '#a8a29e' },
+  sectionCount: { fontSize: 13, fontWeight: 600, color: COLORS.inkLight },
   list: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 },
   item: {
     width: '100%', display: 'flex', alignItems: 'flex-start', gap: 12,
-    padding: '12px 14px', background: '#fff', border: '1px solid #ece7dd',
+    padding: '12px 14px', background: kaart, border: `1px solid ${lijn}`,
     borderRadius: 12, cursor: 'pointer', textAlign: 'left',
     fontFamily: 'inherit', transition: 'background 0.15s, border-color 0.15s',
   },
-  itemOn: { background: '#f0fdfa', borderColor: tealSoft },
+  itemOn: { background: tealSoft, borderColor: tealSoft },
   box: {
     flexShrink: 0, width: 22, height: 22, borderRadius: 6,
-    border: `2px solid #cbd5cf`, display: 'flex', alignItems: 'center',
-    justifyContent: 'center', fontSize: 14, fontWeight: 700, color: '#fff',
-    background: '#fff', marginTop: 1, transition: 'all 0.15s',
+    border: `2px solid ${lijn}`, display: 'flex', alignItems: 'center',
+    justifyContent: 'center', fontSize: 14, fontWeight: 700, color: kaart,
+    background: kaart, marginTop: 1, transition: 'all 0.15s',
   },
   boxOn: { background: teal, borderColor: teal },
   label: { fontSize: 14.5, lineHeight: 1.4, color: ink },
-  labelOn: { color: '#57534e', textDecoration: 'line-through', textDecorationColor: '#a7d3cd' },
+  labelOn: { color: COLORS.ink, textDecoration: 'line-through', textDecorationColor: tealSoft },
   footer: {
-    marginTop: 32, padding: '14px 16px', background: '#fff7ed',
-    border: `1px solid #fed7aa`, borderRadius: 12, fontSize: 13,
+    marginTop: 32, padding: '14px 16px', background: 'rgba(201, 125, 93, 0.10)',
+    border: `1px solid rgba(201, 125, 93, 0.35)`, borderRadius: 12, fontSize: 13,
     lineHeight: 1.5, color: amber,
   },
 };
