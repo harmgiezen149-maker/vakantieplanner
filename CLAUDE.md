@@ -99,7 +99,7 @@ doorproberen; meld het en ga door.
 app/
   page.jsx                → Planner        (hoofdscherm: plan + bibliotheek)
   kaart/page.jsx          → MapView        (alle activiteiten op de kaart)
-  dag/page.jsx            → DayOverview    (dag-voor-dag, met autoroute + GPX)
+  dag/page.jsx            → DayOverview    (dag-voor-dag, route te voet of met de auto + GPX)
   inpakken/page.jsx       → PackingList
   checklist/page.jsx      → Checklist
   verblijven/page.jsx     → StayLog        (logboek: kaart, cijfer, review, foto's)
@@ -514,9 +514,18 @@ fetch of React: de afstanden komen er als `kosten`-functie in. Vier dingen die v
   het dichtst bij de camping ligt altijd de eerste plaats, en dat is precies de volgorde
   die je niet wilt. Wie tóch een vast beginpunt wil, zet het startanker.
   **Wandelen kan alleen met een `ORS_API_KEY`** — de publieke OSRM-demoserver rijdt alleen
-  auto. Zonder sleutel geeft `/api/matrix` een 501 voor `profiel: 'lopen'` en rekent de
-  client hemelsbreed; voor een compact centrum is dat een prima benadering, en in elk
-  geval beter dan auto-afstanden die om het voetgangersgebied heen sturen.
+  auto. Zonder sleutel geven `/api/matrix` en `/api/route` een 501 voor `profiel: 'lopen'`.
+  De volgorde rekent dan hemelsbreed (voor een compact centrum een prima benadering, en in
+  elk geval beter dan auto-afstanden die om het voetgangersgebied heen sturen), en de kaart
+  tekent de stippellijn die hij toch al tekent als er geen route is.
+- **De getekende route volgt hetzelfde vervoer.** `/dag` en de dagkaart in de planner
+  bepalen het met dezelfde `kiesVervoer()` en bouwen hun puntenlijst met dezelfde
+  `routePunten()` — één regel, drie plekken die hem gebruiken, zodat de twee schermen niet
+  uit elkaar kunnen lopen. Twee dingen die daarbij horen: `useRoute` heeft het profiel in
+  zijn **browsercachesleutel** (anders krijgt een wandeldag de auto-geometrie van dezelfde
+  punten terug), en `legIndexByAct` in `DayOverview` kijkt of de route **écht** bij het
+  verblijf begint en niet of de dag er een hééft — in wandelmodus valt dat startpunt weg,
+  en dan zouden alle etappe-afstanden één activiteit opschuiven.
 - **Een anker is een opdracht, geen optimalisatie.** Levert het omgooien niets op, dan
   laat `optimaliseerVolgorde` de lijst met rust — behalve als er een anker staat: dan
   wordt dat uitgevoerd, ook als de route er langer van wordt. De gebruiker wint.

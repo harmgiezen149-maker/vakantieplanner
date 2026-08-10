@@ -6,8 +6,14 @@ export const dynamic = 'force-dynamic';
 // Gebruikt OpenRouteService als ORS_API_KEY is gezet (env var),
 // anders de publieke OSRM demo-server (geen key nodig).
 //
+// Body: { points: [[lat,lng], …], profiel?: 'rijden' | 'lopen' }
 // Respons: { segments: [{distance, duration}], totalDistance, totalDuration, geometry }
 // geometry = GeoJSON LineString { coordinates: [[lng,lat], ...] }
+//
+// **Wandelen kan alleen met een ORS-sleutel** — de publieke OSRM-demoserver
+// rijdt alleen auto. Zonder sleutel geeft deze route 501 voor 'lopen', en tekent
+// de kaart de stippellijn die hij toch al tekent als er geen route is. Dat is
+// eerlijker dan een autoroute over de ring onder het kopje "lopen".
 
 function validPoints(points) {
   return Array.isArray(points)
@@ -20,10 +26,13 @@ function validPoints(points) {
     );
 }
 
-async function routeViaORS(points, apiKey) {
+const ORS_PROFIEL = { rijden: 'driving-car', lopen: 'foot-walking' };
+
+async function routeViaORS(points, apiKey, profiel) {
   // ORS verwacht [lng, lat]
   const coordinates = points.map(([lat, lng]) => [lng, lat]);
-  const res = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
+  const url = `https://api.openrouteservice.org/v2/directions/${ORS_PROFIEL[profiel]}/geojson`;
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Authorization': apiKey,
@@ -89,9 +98,14 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Ongeldige punten' }, { status: 400 });
     }
 
+    const profiel = body?.profiel === 'lopen' ? 'lopen' : 'rijden';
     const orsKey = process.env.ORS_API_KEY;
+    if (profiel === 'lopen' && !orsKey) {
+      return NextResponse.json({ error: 'geen wandelroute' }, { status: 501 });
+    }
+
     const result = orsKey
-      ? await routeViaORS(points, orsKey)
+      ? await routeViaORS(points, orsKey, profiel)
       : await routeViaOSRM(points);
 
     return NextResponse.json(result);

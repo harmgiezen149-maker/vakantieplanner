@@ -7,7 +7,7 @@ import {
   ChevronRight, RefreshCw, User, Wifi, WifiOff, Check, AlertCircle, MapPin, Map as MapIcon,
   Pencil, Car, ChevronUp, ChevronDown, CheckSquare, Backpack,
   Settings, CalendarRange, Compass, Star, ShieldCheck, Wallet, Crosshair,
-  Route, Loader2, Flag, Play,
+  Route, Loader2, Flag, Play, Footprints,
 } from 'lucide-react';
 import {
   COLORS, CATEGORIES, CATEGORY_ORDER, DEFAULT_ACTIVITIES,
@@ -16,7 +16,7 @@ import {
 } from '@/lib/data';
 import { useRoute } from '@/lib/useRoute';
 import {
-  optimaliseerVolgorde, kostenUitMatrix, hemelsbreed, kiesVervoer,
+  optimaliseerVolgorde, kostenUitMatrix, hemelsbreed, kiesVervoer, routePunten,
 } from '@/lib/volgorde';
 import { useWeer } from '@/lib/useWeer';
 import { formatTemp } from '@/lib/weer';
@@ -654,26 +654,26 @@ const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, 
     }
   };
 
-  // Verzamel coords voor route-berekening
-  const routePoints = useMemo(() => {
-    const acts = activities.map(id => activityById[id]).filter(a => a && a.coords);
-    if (acts.length === 0) return [];
-    const pts = [];
-    if (day.startCoords) pts.push(day.startCoords);
-    acts.forEach(a => pts.push(a.coords));
-    if (day.endCoords) pts.push(day.endCoords);
-    // Dedupliceer aangrenzende identieke coördinaten (bv. activiteit op het verblijf zelf)
-    const cleaned = pts.filter((p, i) => {
-      if (i === 0) return true;
-      const [la, ln] = p;
-      const [pla, pln] = pts[i - 1];
-      return Math.abs(la - pla) > 0.0001 || Math.abs(ln - pln) > 0.0001;
-    });
-    return cleaned.length >= 2 ? cleaned : [];
-  }, [activities, activityById, day]);
+  // Coords van de stops, en daaruit de route. Ligt alles binnen loopafstand,
+  // dan is dit een stadsdag: dan telt het verblijf niet mee en rekenen we te
+  // voet — dezelfde regel als de knop hierboven, met dezelfde functies, zodat
+  // dit scherm en /dag niet uit elkaar lopen.
+  const stops = useMemo(
+    () => activities.map(id => activityById[id]?.coords).filter(Boolean),
+    [activities, activityById],
+  );
+  const vervoer = useMemo(
+    () => kiesVervoer(stops, anker?.vervoer || null),
+    [stops, anker],
+  );
+  const lopen = vervoer === 'lopen';
+  const routePoints = useMemo(
+    () => routePunten(stops, { begin: day.startCoords, eind: day.endCoords, vervoer }),
+    [stops, day, vervoer],
+  );
 
-  const { route } = useRoute(routePoints, hasActivities);
-  const hasStartCoords = Boolean(day.startCoords);
+  const { route } = useRoute(routePoints, hasActivities, vervoer);
+  const hasStartCoords = Boolean(!lopen && day.startCoords);
 
   return (
     <div style={{
@@ -855,10 +855,10 @@ const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, 
           fontWeight: 600,
           letterSpacing: 0.2,
         }}>
-          <Car size={12} />
+          {lopen ? <Footprints size={12} /> : <Car size={12} />}
           <span>{formatDistance(route.totalDistance)}</span>
           <span style={{ opacity: 0.5 }}>·</span>
-          <span>{formatDuration(route.totalDuration)} rijden</span>
+          <span>{formatDuration(route.totalDuration)} {lopen ? 'lopen' : 'rijden'}</span>
           <span style={{ flex: 1 }} />
           <span style={{ fontSize: 9, color: COLORS.inkLight, fontWeight: 500 }}>
             {hasStartCoords ? 'heen + terug' : 'tussen stops'}
@@ -1535,11 +1535,10 @@ export default function Planner() {
     const begin = lopen ? null : (dag?.startCoords || null);
     const eind = lopen ? null : (dag?.endCoords || null);
 
-    const punten = [
-      ...(begin ? [begin] : []),
-      ...stops,
-      ...(eind ? [eind] : []),
-    ];
+    // Zelfde puntenlijst als de kaart tekent — één plek waar die regel staat.
+    const punten = routePunten(stops, {
+      begin: dag?.startCoords, eind: dag?.endCoords, vervoer,
+    });
 
     const matrix = punten.length >= 2 && punten.length <= 25
       ? await haalMatrix(punten, vervoer)

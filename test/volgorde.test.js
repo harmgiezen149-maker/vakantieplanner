@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   hemelsbreed, optimaliseerVolgorde, canoniekeVolgorde, herstelMatrix, kostenUitMatrix,
-  isWandelbaar, kiesVervoer, WANDEL_DREMPEL_M,
+  isWandelbaar, kiesVervoer, WANDEL_DREMPEL_M, routePunten,
 } from '../lib/volgorde.js';
 
 // Een vierkant van ~1 km, met de hoeken linksom genummerd:
@@ -247,6 +247,45 @@ test('zonder verblijf als begin en eind komt er een andere volgorde uit', () => 
   const metVerblijf = optimaliseerVolgorde(stops, { begin: CAMPING, eind: CAMPING });
   const zonder = optimaliseerVolgorde(stops, {});
   assert.notDeepEqual(metVerblijf.ids, zonder.ids);
+});
+
+// ── De punten van de dagroute ───────────────────────────────────────
+
+test('rijden begint en eindigt bij het verblijf', () => {
+  const uit = routePunten([A, B], { begin: C, eind: D, vervoer: 'rijden' });
+  assert.deepEqual(uit, [C, A, B, D]);
+});
+
+test('lopen laat het verblijf weg', () => {
+  const uit = routePunten([A, B], { begin: C, eind: D, vervoer: 'lopen' });
+  assert.deepEqual(uit, [A, B], 'naar de stad rijd je, in de stad loop je');
+});
+
+test('een activiteit óp het verblijf levert geen etappe van nul op', () => {
+  const uit = routePunten([C, A, B], { begin: C, eind: D, vervoer: 'rijden' });
+  assert.deepEqual(uit, [C, A, B, D], 'het dubbele beginpunt valt weg');
+});
+
+test('alleen aangrenzende dubbelen vallen weg', () => {
+  // Twee keer dezelfde plek met iets ertussen is een echte heen-en-weer.
+  const uit = routePunten([A, B, A], { vervoer: 'lopen' });
+  assert.deepEqual(uit, [A, B, A]);
+});
+
+test('minder dan twee punten geeft een lege lijst', () => {
+  assert.deepEqual(routePunten([A], { vervoer: 'lopen' }), []);
+  assert.deepEqual(routePunten([], { begin: C, eind: D }), [],
+    'alleen het verblijf is geen route');
+  assert.deepEqual(routePunten(null, {}), []);
+});
+
+test('een verblijf zonder coördinaten valt niet om', () => {
+  assert.deepEqual(routePunten([A, B], { begin: null, eind: undefined }), [A, B]);
+  assert.deepEqual(routePunten([A, B, null, 'onzin'], {}), [A, B]);
+});
+
+test('zonder opties gedraagt hij zich als een rijdag', () => {
+  assert.deepEqual(routePunten([A, B]), [A, B]);
 });
 
 // ── Canonieke volgorde en de matrix terugdraaien ────────────────────

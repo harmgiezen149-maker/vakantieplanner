@@ -2,13 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Car, Download, Check } from 'lucide-react';
+import {
+  ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Car, Download, Check,
+  Maximize2, Minimize2, Footprints,
+} from 'lucide-react';
 import {
   COLORS, CATEGORIES, DEFAULT_ACTIVITIES,
   DEFAULT_TRIP_CONFIG, buildDays, staysWithColors,
   getMapsLink, applyLocationOverride, formatDistance, formatDuration,
 } from '@/lib/data';
 import { useRoute } from '@/lib/useRoute';
+import { kiesVervoer, routePunten } from '@/lib/volgorde';
 import { useWeer } from '@/lib/useWeer';
 import { formatTemp } from '@/lib/weer';
 import OfflineMelding from '@/components/OfflineMelding';
@@ -103,7 +107,34 @@ const DayRouteMap = ({ day, acts, routeGeometry }) => {
   const mapRef = useRef(null);
   const leafletRef = useRef(null);
   const layersRef = useRef([]);
+  // De punten van de laatste tekenbeurt, zodat we na een formaatwissel opnieuw
+  // passend kunnen maken (zelfde patroon als StayMap in StayLog.jsx).
+  const ptsRef = useRef([]);
   const [ready, setReady] = useState(false);
+  const [full, setFull] = useState(false);
+
+  // Bij het wisselen van formaat moet Leaflet opnieuw meten, en daarna opnieuw
+  // passend maken — het venster heeft een andere verhouding. Zonder dit blijft
+  // de kaart in zijn oude afmeting hangen, met grijze randen.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const map = mapRef.current;
+      const L = leafletRef.current;
+      if (!map) return;
+      map.invalidateSize();
+      if (L && ptsRef.current.length > 0) {
+        map.fitBounds(L.latLngBounds(ptsRef.current), { padding: [28, 28], maxZoom: 15 });
+      }
+    }, 80);
+    return () => clearTimeout(t);
+  }, [full]);
+
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e) => { if (e.key === 'Escape') setFull(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [full]);
 
   useEffect(() => {
     let mounted = true;
@@ -237,20 +268,39 @@ const DayRouteMap = ({ day, acts, routeGeometry }) => {
       layersRef.current.push(line);
     }
 
+    ptsRef.current = pts;
     if (pts.length > 0) {
       map.fitBounds(L.latLngBounds(pts), { padding: [28, 28], maxZoom: 13 });
     }
   }, [day, acts, routeGeometry, ready]);
 
   return (
-    <div
-      ref={containerRef}
-      style={{
-        width: '100%', height: 300, borderRadius: 14,
-        overflow: 'hidden', border: `1px solid ${COLORS.hairline}`,
-        zIndex: 0, position: 'relative',
-      }}
-    />
+    <div style={full ? {
+      position: 'fixed', inset: 0, zIndex: 70, background: COLORS.cream,
+      padding: 10, display: 'flex', flexDirection: 'column',
+    } : { position: 'relative' }}>
+      <div
+        ref={containerRef}
+        style={{
+          width: '100%', height: full ? '100%' : 300, flex: full ? 1 : undefined,
+          borderRadius: full ? 12 : 14,
+          overflow: 'hidden', border: `1px solid ${COLORS.hairline}`,
+          zIndex: 0, position: 'relative',
+        }}
+      />
+      <button
+        onClick={() => setFull(f => !f)}
+        title={full ? 'Verkleinen' : 'Volledig scherm'}
+        aria-label={full ? 'Verkleinen' : 'Volledig scherm'}
+        style={{
+          position: 'absolute', top: full ? 16 : 10, right: full ? 16 : 10, zIndex: 1001,
+          width: 36, height: 36, borderRadius: 10, border: `1px solid ${COLORS.hairline}`,
+          background: COLORS.cream, color: COLORS.forest,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', boxShadow: '0 2px 8px rgba(31,41,34,0.2)',
+        }}
+      >{full ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
+    </div>
   );
 };
 
@@ -258,6 +308,9 @@ export default function DayOverview() {
   const [plan, setPlan] = useState(null);
   const [customActivities, setCustomActivities] = useState([]);
   const [locationOverrides, setLocationOverrides] = useState({});
+  // Route-instellingen per dag; hier alleen gelezen, want dit scherm zet geen
+  // ankers. De PUT stuurt het veld dus ook niet mee (valkuil 3 vangt dat op).
+  const [routeAnkers, setRouteAnkers] = useState({});
   const [tripConfig, setTripConfig] = useState(DEFAULT_TRIP_CONFIG);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -287,6 +340,7 @@ export default function DayOverview() {
         setPlan(data.plan || {});
         setCustomActivities(data.customActivities || []);
         setLocationOverrides(data.locationOverrides || {});
+        setRouteAnkers(data.routeAnkers || {});
         if (data.tripConfig) setTripConfig(data.tripConfig);
       } catch {
         // Geen verbinding: de laatst geladen versie tonen, met de balk erboven.
@@ -296,6 +350,7 @@ export default function DayOverview() {
           setPlan(kopie.data.plan || {});
           setCustomActivities(kopie.data.customActivities || []);
           setLocationOverrides(kopie.data.locationOverrides || {});
+          setRouteAnkers(kopie.data.routeAnkers || {});
           if (kopie.data.tripConfig) setTripConfig(kopie.data.tripConfig);
           setOfflineOp(kopie.op);
         } else {
@@ -363,34 +418,47 @@ export default function DayOverview() {
     return (plan[day.key] || []).map(id => activityById[id]).filter(Boolean);
   }, [day, plan, activityById]);
 
-  // Routepunten in geplande volgorde: verblijf → activiteiten → verblijf
+  // Te voet of met de auto? Dezelfde regel als de knop "Slimme volgorde" in de
+  // planner, met dezelfde functie — anders kunnen de twee schermen uit elkaar
+  // gaan lopen voor dezelfde dag.
+  const stops = useMemo(() => acts.filter(a => a.coords).map(a => a.coords), [acts]);
+  const vervoer = useMemo(
+    () => kiesVervoer(stops, day ? routeAnkers[day.key]?.vervoer : null),
+    [stops, routeAnkers, day],
+  );
+  const lopen = vervoer === 'lopen';
+
+  // Routepunten in geplande volgorde. Bij rijden hoort het verblijf erbij, bij
+  // lopen niet — zie routePunten() in lib/volgorde.js.
   const routePoints = useMemo(() => {
     if (!day) return null;
-    const coords = acts.filter(a => a.coords).map(a => a.coords);
-    if (coords.length === 0) return null;
-    const pts = [day.startCoords, ...coords, day.endCoords].filter(Boolean);
-    const cleaned = pts.filter((p, i) => {
-      if (i === 0) return true;
-      return Math.abs(p[0] - pts[i - 1][0]) > 0.0001 || Math.abs(p[1] - pts[i - 1][1]) > 0.0001;
+    const pts = routePunten(stops, {
+      begin: day.startCoords, eind: day.endCoords, vervoer,
     });
-    return cleaned.length >= 2 ? cleaned : null;
-  }, [day, acts]);
+    return pts.length >= 2 ? pts : null;
+  }, [day, stops, vervoer]);
 
-  const { route, loading: routeLoading } = useRoute(routePoints, !!routePoints);
+  const { route, loading: routeLoading } = useRoute(routePoints, !!routePoints, vervoer);
 
-  // Per activiteit: welk route-segment hoort bij de rit ernaartoe?
+  // Per activiteit: welk route-segment hoort bij de weg ernaartoe?
   // (Activiteiten zonder coördinaten doen niet mee in de route.)
+  //
+  // Let op: dit hangt ervan af of de route écht bij het verblijf begint, niet of
+  // de dag een verblijf hééft. In wandelmodus valt dat startpunt weg, en dan
+  // zouden alle afstanden één plaats opschuiven.
+  const startBijVerblijf = Boolean(!lopen && day?.startCoords
+    && routePoints?.[0] === day.startCoords);
   const legIndexByAct = useMemo(() => {
     const res = acts.map(() => null);
     let coordPos = 0;
     acts.forEach((a, i) => {
       if (!a.coords) return;
-      const legIdx = day?.startCoords ? coordPos : coordPos - 1;
+      const legIdx = startBijVerblijf ? coordPos : coordPos - 1;
       coordPos++;
       if (legIdx >= 0) res[i] = legIdx;
     });
     return res;
-  }, [acts, day]);
+  }, [acts, startBijVerblijf]);
 
   const fmtDate = (d) => `${d.dayShort} ${d.date}`;
 
@@ -580,12 +648,20 @@ export default function DayOverview() {
                       display: 'flex', alignItems: 'center', gap: 8,
                       padding: '8px 4px 0', fontSize: 12.5, color: COLORS.ink,
                     }}>
-                      <Car size={14} color={COLORS.forest} />
+                      {lopen
+                        ? <Footprints size={14} color={COLORS.forest} />
+                        : <Car size={14} color={COLORS.forest} />}
                       {routeLoading
                         ? 'Route berekenen…'
                         : route?.totalDistance
-                          ? <>Totale route: <strong>{formatDistance(route.totalDistance)}</strong> · ≈ {formatDuration(route.totalDuration)} rijden</>
-                          : 'Route niet beschikbaar — markers tonen de geplande volgorde'}
+                          ? <>
+                              {lopen ? 'Wandeling' : 'Totale route'}:{' '}
+                              <strong>{formatDistance(route.totalDistance)}</strong>
+                              {' '}· ≈ {formatDuration(route.totalDuration)} {lopen ? 'lopen' : 'rijden'}
+                            </>
+                          : lopen
+                            ? 'Wandelroute niet beschikbaar — de stippellijn toont de volgorde'
+                            : 'Route niet beschikbaar — markers tonen de geplande volgorde'}
                     </div>
                   </div>
                 )}
@@ -610,7 +686,7 @@ export default function DayOverview() {
                               width: 2, height: 14, background: COLORS.hairline,
                               borderRadius: 2, marginRight: 4,
                             }} />
-                            <Car size={12} />
+                            {lopen ? <Footprints size={12} /> : <Car size={12} />}
                             {formatDistance(leg.distance)} · {formatDuration(leg.duration)}
                           </div>
                         )}
