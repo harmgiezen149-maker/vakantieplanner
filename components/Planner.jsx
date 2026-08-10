@@ -15,7 +15,9 @@ import {
   getMapsLink, applyLocationOverride, formatDistance, formatDuration,
 } from '@/lib/data';
 import { useRoute } from '@/lib/useRoute';
-import { optimaliseerVolgorde, kostenUitMatrix, hemelsbreed } from '@/lib/volgorde';
+import {
+  optimaliseerVolgorde, kostenUitMatrix, hemelsbreed, kiesVervoer,
+} from '@/lib/volgorde';
 import { useWeer } from '@/lib/useWeer';
 import { formatTemp } from '@/lib/weer';
 import { getPin } from '@/lib/maps';
@@ -596,6 +598,14 @@ const chipEditInput = {
   width: '100%', boxSizing: 'border-box',
 };
 
+// Linkjes in de melding onder "Slimme volgorde"
+const slimLink = {
+  border: 'none', background: 'transparent', padding: 0, cursor: 'pointer',
+  color: COLORS.forest, fontFamily: "'DM Sans', sans-serif",
+  fontSize: 11.5, fontWeight: 700, textDecoration: 'underline',
+  whiteSpace: 'nowrap',
+};
+
 // ============ DAY CARD ============
 
 const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, weer, anker, offline, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay, onSwapDay, onOptimaliseer, onZetVolgorde, onZetAnker }) => {
@@ -609,31 +619,36 @@ const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, 
   // Twee stops met een locatie is het minimum om iets te kunnen omgooien.
   const teOrdenen = activities.filter(id => Array.isArray(activityById[id]?.coords)).length;
 
-  const slimmeVolgorde = async () => {
+  const slimmeVolgorde = async (keuze) => {
     setBezig(true);
     setSlim(null);
     try {
-      const uit = await onOptimaliseer(day.key);
-      const hoe = uit.echt ? 'rijden' : 'hemelsbreed';
+      const uit = await onOptimaliseer(day.key, keuze);
+      // Zeggen wát hij deed: te voet of met de auto, en of dat op echte
+      // routes was of hemelsbreed. Anders is het magie.
+      const hoe = uit.vervoer === 'lopen'
+        ? (uit.echt ? 'lopen' : 'lopen, hemelsbreed')
+        : (uit.echt ? 'rijden' : 'rijden, hemelsbreed');
       const zonder = uit.zonderLocatie
         ? ` · ${uit.zonderLocatie} zonder locatie ${uit.zonderLocatie === 1 ? 'staat' : 'staan'} onderaan`
         : '';
+      const anders = uit.vervoer === 'lopen' ? 'rijden' : 'lopen';
       if (!uit.gewijzigd) {
-        setSlim({ tekst: `Dit was al de kortste volgorde${zonder}.`, vorige: null });
+        setSlim({ tekst: `Dit was al de kortste volgorde (${hoe})${zonder}.`, vorige: null, anders });
       } else if (uit.na < uit.voor) {
         setSlim({
           tekst: `Volgorde aangepast · ${formatDistance(uit.voor)} → ${formatDistance(uit.na)} ${hoe}${zonder}`,
-          vorige: uit.vorige,
+          vorige: uit.vorige, anders,
         });
       } else {
         // Kan alleen met een anker: dat is een opdracht, geen optimalisatie.
         setSlim({
           tekst: `Volgorde volgt je start- en eindpunt · ${formatDistance(uit.na)} ${hoe}${zonder}`,
-          vorige: uit.vorige,
+          vorige: uit.vorige, anders,
         });
       }
     } catch {
-      setSlim({ tekst: 'Kon de volgorde nu niet berekenen.', vorige: null });
+      setSlim({ tekst: 'Kon de volgorde nu niet berekenen.', vorige: null, anders: null });
     } finally {
       setBezig(false);
     }
@@ -718,7 +733,7 @@ const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, 
           }}>
             {teOrdenen >= 2 && (
               <button
-                onClick={slimmeVolgorde}
+                onClick={() => slimmeVolgorde()}
                 disabled={bezig || offline}
                 title={offline
                   ? 'Geen verbinding — de volgorde wordt niet opgeslagen'
@@ -801,15 +816,19 @@ const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, 
           background: 'rgba(74, 111, 79, 0.10)',
           fontSize: 11.5, color: COLORS.moss, fontWeight: 600, lineHeight: 1.45,
         }}>
-          <span style={{ flex: 1, minWidth: 0 }}>{slim.tekst}</span>
+          {/* De tekst pakt de hele regel, zodat de linkjes eronder komen te
+              staan in plaats van hem tot vier regels samen te knijpen. */}
+          <span style={{ flex: '1 1 100%', minWidth: 0 }}>{slim.tekst}</span>
+          {slim.anders && !bezig && (
+            <button
+              onClick={() => slimmeVolgorde(slim.anders)}
+              style={slimLink}
+            >{slim.anders === 'rijden' ? 'Liever met de auto?' : 'Liever te voet?'}</button>
+          )}
           {slim.vorige && (
             <button
               onClick={() => { onZetVolgorde(day.key, slim.vorige); setSlim(null); }}
-              style={{
-                border: 'none', background: 'transparent', padding: 0, cursor: 'pointer',
-                color: COLORS.forest, fontFamily: "'DM Sans', sans-serif",
-                fontSize: 11.5, fontWeight: 700, textDecoration: 'underline',
-              }}
+              style={slimLink}
             >Ongedaan maken</button>
           )}
           <button
@@ -1477,12 +1496,12 @@ export default function Planner() {
   // rijafstanden komen van /api/matrix; is die niet bereikbaar — geen bereik,
   // server nors — dan rekent `optimaliseerVolgorde` hemelsbreed door. De knop
   // moet het ook doen op een camping zonder streepje bereik.
-  const haalMatrix = async (punten) => {
+  const haalMatrix = async (punten, profiel) => {
     try {
       const res = await fetch('/api/matrix', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Family-Pin': getPin() },
-        body: JSON.stringify({ points: punten }),
+        body: JSON.stringify({ points: punten, profiel }),
       });
       if (!res.ok) return null;
       const data = await res.json();
@@ -1494,27 +1513,40 @@ export default function Planner() {
     }
   };
 
-  const optimaliseerDag = async (dayKey) => {
+  // `keuze` overschrijft eenmalig wat er voor deze dag is ingesteld — dat is de
+  // "Liever met de auto?"-link in de melding.
+  const optimaliseerDag = async (dayKey, keuze) => {
     const dag = days.find(d => d.key === dayKey);
     const ids = plan[dayKey] || [];
     const items = ids.map(id => ({ id, coords: activityById[id]?.coords || null }));
     const anker = routeAnkers[dayKey] || {};
+    const stops = items.filter(x => Array.isArray(x.coords)).map(x => x.coords);
 
-    // De punten die de matrix moet kennen: het verblijf hoort erbij, want de
-    // rit ernaartoe telt mee in de route.
+    // Liggen de stops binnen loopafstand van elkaar, dan is dit een stadsdag en
+    // rekenen we te voet. Een auto-router stuurt je daar over de ring en om het
+    // voetgangersgebied heen, en dat is niet de volgorde waarin je loopt.
+    const vervoer = kiesVervoer(stops, keuze ?? anker.vervoer ?? null);
+    const lopen = vervoer === 'lopen';
+
+    // Bij lopen telt de rit vanaf het verblijf niet mee: naar de stad rijd je,
+    // en pas daar begint de wandeling. Anders wint de stop die het dichtst bij
+    // de camping ligt altijd de eerste plaats. Wil je toch een vast beginpunt,
+    // dan is daar het startanker voor.
+    const begin = lopen ? null : (dag?.startCoords || null);
+    const eind = lopen ? null : (dag?.endCoords || null);
+
     const punten = [
-      ...(dag?.startCoords ? [dag.startCoords] : []),
-      ...items.filter(x => Array.isArray(x.coords)).map(x => x.coords),
-      ...(dag?.endCoords ? [dag.endCoords] : []),
+      ...(begin ? [begin] : []),
+      ...stops,
+      ...(eind ? [eind] : []),
     ];
 
     const matrix = punten.length >= 2 && punten.length <= 25
-      ? await haalMatrix(punten)
+      ? await haalMatrix(punten, vervoer)
       : null;
 
     const uit = optimaliseerVolgorde(items, {
-      begin: dag?.startCoords || null,
-      eind: dag?.endCoords || null,
+      begin, eind,
       start: anker.start || null,
       stop: anker.eind || null,
       kosten: matrix ? kostenUitMatrix(punten, matrix) : hemelsbreed,
@@ -1522,7 +1554,17 @@ export default function Planner() {
 
     const gewijzigd = uit.ids.some((id, i) => id !== ids[i]);
     if (gewijzigd) setPlan(p => ({ ...p, [dayKey]: uit.ids }));
-    return { ...uit, gewijzigd, echt: Boolean(matrix), vorige: ids };
+    // Een eenmalige omschakeling onthouden we voor deze dag, zodat een volgende
+    // klik op de knop hetzelfde doet.
+    if (keuze) zetVervoer(dayKey, keuze);
+    return { ...uit, gewijzigd, echt: Boolean(matrix), vervoer, vorige: ids };
+  };
+
+  const zetVervoer = (dayKey, vervoer) => {
+    setRouteAnkers(a => ({
+      ...a,
+      [dayKey]: { start: null, eind: null, ...(a[dayKey] || {}), vervoer },
+    }));
   };
 
   // Terugzetten na "Ongedaan maken"
@@ -1548,7 +1590,9 @@ export default function Planner() {
       if (rol === 'eind' && nieuw.start === activityId) nieuw.start = null;
 
       const volgende = { ...a };
-      if (!nieuw.start && !nieuw.eind) delete volgende[dayKey];
+      // Alleen weggooien als er echt niets meer over is — een vervoerkeuze
+      // zonder ankers is ook iets om te bewaren.
+      if (!nieuw.start && !nieuw.eind && !nieuw.vervoer) delete volgende[dayKey];
       else volgende[dayKey] = nieuw;
       return volgende;
     });

@@ -63,8 +63,9 @@ function sanitizeTripConfig(raw) {
   };
 }
 
-// Start- en eindpunt van de route per dag: { 'YYYY-MM-DD': { start, eind } }.
+// Route-instellingen per dag: { 'YYYY-MM-DD': { start, eind, vervoer } }.
 // Bewust per dag en niet op de activiteit — zie de valkuil in CLAUDE.md.
+// `vervoer` is null (zelf bepalen op basis van de afstanden), 'lopen' of 'rijden'.
 function sanitizeRouteAnkers(raw) {
   if (!raw || typeof raw !== 'object') return {};
   const uit = {};
@@ -73,9 +74,11 @@ function sanitizeRouteAnkers(raw) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dag) || !anker || typeof anker !== 'object') continue;
     const start = id(anker.start);
     const eind = id(anker.eind);
-    // Een dag zonder ankers hoeft er niet in te staan; dat houdt het document
-    // klein en het opruimen vanzelfsprekend.
-    if (start || eind) uit[dag] = { start, eind };
+    const vervoer = anker.vervoer === 'lopen' || anker.vervoer === 'rijden'
+      ? anker.vervoer : null;
+    // Een dag zonder instellingen hoeft er niet in te staan; dat houdt het
+    // document klein en het opruimen vanzelfsprekend.
+    if (start || eind || vervoer) uit[dag] = { start, eind, vervoer };
   }
   return uit;
 }

@@ -112,6 +112,14 @@ De kaart toont per dag een route met afstand en rijtijd. Standaard gebruikt de a
 1. Maak een gratis key aan op [openrouteservice.org](https://openrouteservice.org/dev/#/signup)
 2. Voeg in Vercel toe: `ORS_API_KEY` = `jouw-key`
 
+**Deze sleutel bepaalt ook of "Slimme volgorde" écht te voet kan rekenen.** Liggen de
+activiteiten van een dag binnen twee kilometer van elkaar, dan behandelt de app het als
+een stadsbezoek en zoekt hij de kortste *wandelroute* — door parken, over bruggetjes en
+door het voetgangersgebied. Daar is een wandelrouter voor nodig, en de publieke
+OSRM-server kent alleen auto. Zónder sleutel rekent de wandelmodus hemelsbreed: voor een
+compact centrum meestal dezelfde volgorde, maar niet altijd. De melding onder de knop
+zegt welke van de twee het was.
+
 ### 7. (Optioneel) Vercel Blob voor foto's bij verblijven
 
 Het verblijvenlogboek kan foto's per verblijf bewaren. Die gaan niet in Redis — dat is voor kleine JSON-documenten — maar in Vercel Blob:

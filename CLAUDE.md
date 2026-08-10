@@ -496,22 +496,36 @@ De PWA is manifest + iconen, meer niet. Voeg er geen offline-caching aan toe zon
 expliciet te bespreken: gecachete JS naast een gedeeld Redis-document geeft precies de
 "waarom zie ik oude data"-klasse bugs die punt 4 probeert te vermijden.
 
-**20. De slimme volgorde: ankers per dag, en een matrix die altijd dezelfde sleutel heeft.**
+**20. De slimme volgorde: ankers per dag, te voet in de stad, en een matrix die altijd
+dezelfde sleutel heeft.**
 "Slimme volgorde" op een dagkaart zet de activiteiten van die dag in de kortste route.
 Het rekenwerk staat in `lib/volgorde.js` (dichtstbijzijnde buur + 2-opt) en weet niets van
-fetch of React: de afstanden komen er als `kosten`-functie in. Drie dingen die vastliggen:
+fetch of React: de afstanden komen er als `kosten`-functie in. Vier dingen die vastliggen:
 
 - **De ankers staan per dag in `routeAnkers`, niet op de activiteit.** Dat gaat bewust
   tegen valkuil 1 in: "beginpunt" is een eigenschap van de route van díé dag, niet van de
   plek. Dezelfde parkeergarage kan dinsdag je startpunt zijn en donderdag een tussenstop.
-  Nieuw top-level veld betekent ook: valkuil 3 geldt, en die bewaar-tak staat er.
+  Nieuw top-level veld betekent ook: valkuil 3 geldt, en die bewaar-tak staat er. In
+  hetzelfde blokje staat `vervoer` — daarom heet het veld één ding en bevat het drie.
+- **Dicht bij elkaar = te voet, en dan telt het verblijf niet mee.** `kiesVervoer()` kijkt
+  naar de grootste afstand tússen de stops (`WANDEL_DREMPEL_M`, nu 2 km) en niet naar de
+  afstand tot de camping: naar de stad rijd je, in de stad loop je. In wandelmodus laat
+  `optimaliseerDag` `begin` en `eind` daarom weg. Doe je dat niet, dan wint de stop die
+  het dichtst bij de camping ligt altijd de eerste plaats, en dat is precies de volgorde
+  die je niet wilt. Wie tóch een vast beginpunt wil, zet het startanker.
+  **Wandelen kan alleen met een `ORS_API_KEY`** — de publieke OSRM-demoserver rijdt alleen
+  auto. Zonder sleutel geeft `/api/matrix` een 501 voor `profiel: 'lopen'` en rekent de
+  client hemelsbreed; voor een compact centrum is dat een prima benadering, en in elk
+  geval beter dan auto-afstanden die om het voetgangersgebied heen sturen.
 - **Een anker is een opdracht, geen optimalisatie.** Levert het omgooien niets op, dan
   laat `optimaliseerVolgorde` de lijst met rust — behalve als er een anker staat: dan
   wordt dat uitgevoerd, ook als de route er langer van wordt. De gebruiker wint.
-- **De matrix wordt canoniek gesorteerd opgevraagd.** `/api/matrix` sorteert de punten
-  vóór het opvragen en draait dat daarna terug met `herstelMatrix()`. Zonder die
-  sortering krijgt dezelfde verzameling punten na elke herordening een andere
-  cachesleutel, en is elke tweede klik een misser — precies wanneer je hem nodig hebt.
+- **De matrix wordt canoniek gesorteerd opgevraagd, mét het profiel in de sleutel.**
+  `/api/matrix` sorteert de punten vóór het opvragen en draait dat daarna terug met
+  `herstelMatrix()`. Zonder die sortering krijgt dezelfde verzameling punten na elke
+  herordening een andere cachesleutel, en is elke tweede klik een misser — precies
+  wanneer je hem nodig hebt. Het profiel (`lopen`/`rijden`) hoort er ook in, anders krijgt
+  een wandeldag de auto-matrix van dezelfde stops terug.
 
 Mislukt `/api/matrix`, dan rekent de client hemelsbreed door en zegt dat erbij in de
 melding. Dat is geen storing maar de terugval: de knop moet het ook doen op een camping

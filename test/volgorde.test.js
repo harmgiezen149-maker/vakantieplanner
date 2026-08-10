@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   hemelsbreed, optimaliseerVolgorde, canoniekeVolgorde, herstelMatrix, kostenUitMatrix,
+  isWandelbaar, kiesVervoer, WANDEL_DREMPEL_M,
 } from '../lib/volgorde.js';
 
 // Een vierkant van ~1 km, met de hoeken linksom genummerd:
@@ -184,6 +185,68 @@ test('kostenUitMatrix zoekt op coördinaat op en valt terug bij een gat', () => 
   assert.equal(kosten(A, B), 4200);
   // C staat niet in de matrix → hemelsbreed
   assert.ok(Math.abs(kosten(A, C) - hemelsbreed(A, C)) < 0.001);
+});
+
+// ── Te voet of met de auto? ─────────────────────────────────────────
+
+// Vijf stops in een stadscentrum: alles binnen ~800 m
+const STAD = [
+  [48.0740, 7.3560], [48.0755, 7.3585], [48.0765, 7.3600],
+  [48.0752, 7.3548], [48.0738, 7.3592],
+];
+const CAMPING = [48.0000, 7.2000];   // ruim tien kilometer verderop
+
+test('stops in een centrum zijn wandelbaar', () => {
+  assert.equal(isWandelbaar(STAD), true);
+});
+
+test('één stop verderop maakt er een rijdag van', () => {
+  assert.equal(isWandelbaar([...STAD, [48.1200, 7.4200]]), false);
+});
+
+test('de afstand tot het verblijf telt niet mee', () => {
+  // Naar de stad rijd je, in de stad loop je. Het verblijf zit dus niet in de
+  // lijst die je aan isWandelbaar geeft — maar zelfs als de stops ver van huis
+  // liggen, blijft de wandeling onderling kort.
+  assert.equal(isWandelbaar(STAD), true);
+  assert.ok(hemelsbreed(CAMPING, STAD[0]) > 5000, 'de camping ligt echt ver weg');
+  assert.equal(isWandelbaar([...STAD, CAMPING]), false,
+    'zet je het verblijf er wél bij, dan kantelt het — daarom doen we dat niet');
+});
+
+test('de drempel ligt op de grootste onderlinge afstand', () => {
+  // Twee stops net binnen en net buiten de drempel, op dezelfde breedtegraad.
+  const graden = (meters) => meters / 111320;
+  const a = [48, 6];
+  const netBinnen = [48 + graden(WANDEL_DREMPEL_M - 50), 6];
+  const netBuiten = [48 + graden(WANDEL_DREMPEL_M + 50), 6];
+  assert.equal(isWandelbaar([a, netBinnen]), true);
+  assert.equal(isWandelbaar([a, netBuiten]), false);
+});
+
+test('nul, één en rommelige punten zijn wandelbaar (er valt niets te rijden)', () => {
+  assert.equal(isWandelbaar([]), true);
+  assert.equal(isWandelbaar(null), true);
+  assert.equal(isWandelbaar([STAD[0]]), true);
+  assert.equal(isWandelbaar([STAD[0], null, undefined]), true);
+});
+
+test('een eigen keuze wint altijd van de automaat', () => {
+  assert.equal(kiesVervoer(STAD, null), 'lopen');
+  assert.equal(kiesVervoer(STAD, 'rijden'), 'rijden', 'stad, maar jij wilt rijden');
+  const ver = [...STAD, [48.1200, 7.4200]];
+  assert.equal(kiesVervoer(ver, null), 'rijden');
+  assert.equal(kiesVervoer(ver, 'lopen'), 'lopen', 'ver uit elkaar, maar jij wilt lopen');
+  assert.equal(kiesVervoer(STAD, 'onzin'), 'lopen', 'rommel valt terug op de automaat');
+});
+
+test('zonder verblijf als begin en eind komt er een andere volgorde uit', () => {
+  // Dit is het gedrag waar wandelmodus om draait: de rit vanaf de camping telt
+  // niet mee, dus de stop die daar het dichtst bij ligt wint niet vanzelf.
+  const stops = STAD.map((c, i) => item(`s${i}`, c));
+  const metVerblijf = optimaliseerVolgorde(stops, { begin: CAMPING, eind: CAMPING });
+  const zonder = optimaliseerVolgorde(stops, {});
+  assert.notDeepEqual(metVerblijf.ids, zonder.ids);
 });
 
 // ── Canonieke volgorde en de matrix terugdraaien ────────────────────

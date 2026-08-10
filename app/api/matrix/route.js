@@ -4,14 +4,20 @@ import { cacheSleutel, uitCache, naarCache, TTL } from '@/lib/geoCache';
 
 export const dynamic = 'force-dynamic';
 
-// Alle onderlinge rijafstanden tussen een handvol punten, in één oproep.
+// Alle onderlinge afstanden tussen een handvol punten, in één oproep.
 //
-// Hiermee zet /"Slimme volgorde" de activiteiten van een dag in de kortste
+// Hiermee zet "Slimme volgorde" de activiteiten van een dag in de kortste
 // route. Zelfde opzet als /api/route: OpenRouteService als ORS_API_KEY gezet is,
 // anders de publieke OSRM-server (geen sleutel nodig).
 //
+// Body: { points: [[lat,lng], …], profiel?: 'rijden' | 'lopen' }
 // Respons: { distances, durations, bron }  — beide n×n, in meters en seconden,
 // in dezelfde volgorde als de punten die de client stuurde.
+//
+// **Wandelen kan alleen met een ORS-sleutel.** De publieke OSRM-demoserver rijdt
+// alleen auto. Zonder sleutel weigert deze route een wandelmatrix, en rekent de
+// client hemelsbreed — voor een compact centrum een prima benadering, en in elk
+// geval beter dan auto-afstanden die je om het voetgangersgebied heen sturen.
 //
 // Mislukt de oproep, dan geeft deze route 502 en rekent de client hemelsbreed
 // door. Dat is geen storing maar een terugval: de knop moet ook werken op een
@@ -41,10 +47,12 @@ function volledig(matrix, n) {
       Array.isArray(rij) && rij.length === n && rij.every(v => Number.isFinite(v)));
 }
 
-async function matrixViaORS(punten, apiKey) {
+const ORS_PROFIEL = { rijden: 'driving-car', lopen: 'foot-walking' };
+
+async function matrixViaORS(punten, apiKey, profiel) {
   // ORS verwacht [lng, lat] — valkuil 6
   const locations = punten.map(([lat, lng]) => [lng, lat]);
-  const res = await fetch('https://api.openrouteservice.org/v2/matrix/driving-car', {
+  const res = await fetch(`https://api.openrouteservice.org/v2/matrix/${ORS_PROFIEL[profiel]}`, {
     method: 'POST',
     headers: { 'Authorization': apiKey, 'Content-Type': 'application/json' },
     body: JSON.stringify({ locations, metrics: ['distance', 'duration'] }),
@@ -82,21 +90,30 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Ongeldige punten' }, { status: 400 });
     }
 
+    const profiel = body?.profiel === 'lopen' ? 'lopen' : 'rijden';
+    const orsKey = process.env.ORS_API_KEY;
+    if (profiel === 'lopen' && !orsKey) {
+      // Geen wandelrouter beschikbaar. Meteen eerlijk zijn is beter dan een
+      // auto-matrix teruggeven die de client voor wandelafstanden aanziet.
+      return NextResponse.json({ error: 'geen wandelmatrix' }, { status: 501 });
+    }
+
     // Eerst canoniek sorteren, dán opvragen. Zo hoort dezelfde verzameling
     // punten bij dezelfde cachesleutel, ook nadat het optimaliseren de volgorde
     // heeft omgegooid — anders is een klik op "Slimme volgorde" altijd een
     // misser, precies wanneer je de cache nodig hebt.
     const { punten, index } = canoniekeVolgorde(points);
-    const sleutel = cacheSleutel('matrix', punten.flatMap(p => [p[0], p[1]]), 4);
+    // Het profiel hoort in de sleutel: anders krijgt een wandeldag de
+    // auto-matrix van dezelfde stops terug.
+    const sleutel = cacheSleutel('matrix', [profiel, ...punten.flatMap(p => [p[0], p[1]])], 4);
 
     const bewaard = await uitCache(sleutel);
     let uit = bewaard;
 
     if (!uit) {
-      const orsKey = process.env.ORS_API_KEY;
       const n = punten.length;
       const antwoord = orsKey
-        ? await matrixViaORS(punten, orsKey)
+        ? await matrixViaORS(punten, orsKey, profiel)
         : await matrixViaOSRM(punten);
 
       // Afstanden zijn wat we willen; kent de dienst ze niet, dan is rijtijd
