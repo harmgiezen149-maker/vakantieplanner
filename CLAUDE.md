@@ -130,6 +130,7 @@ app/
     verblijven/foto/      foto verwijderen uit Blob (DELETE)
     delen/      GET/POST/DELETE  deel-link beheren (beheer-gated)
     delen/bekijk/ GET     de uitgeklede planning achter een token (open!)
+    delen/dagroute/ GET   de route van één dag achter datzelfde token (open!)
     uitgaven/   GET/POST  kasboek van de reis
     weer/       GET       weersverwachting per dag (Open-Meteo, geen sleutel)
     versie/     GET       welke build er draait (voor de update-melding)
@@ -145,7 +146,8 @@ lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
               (Maps-links + PIN), stayLog.js, stayTypes.js, backup.js, csv.js,
               bezoek.js, conflict.js, delen.js, errorLog.js, geoCache.js, packing.js,
               reisverslag.js, stayValidation.js, toegang.js, uitgaven.js,
-              volgorde.js, weer.js, offline.js, redis.js, useRoute.js, useWeer.js
+              volgorde.js, routeDienst.js, weer.js, offline.js, redis.js,
+              useRoute.js, useWeer.js
 ```
 
 `components/Planner.jsx` was één bestand van 4.100 regels en is opgesplitst: alle sheets
@@ -352,7 +354,7 @@ uit `weigering()`) en toont de bijbehorende vraag. Dat is één state-machine me
 standen; hem opsplitsen in twee geneste poorten geeft precies de bug die er eerst in zat —
 de PIN klopte, en de wachtwoordvraag werd overgeslagen.
 
-**10b. `/api/delen/bekijk` is de enige route die bewust openstaat.**
+**10b. Twee routes onder `/api/delen/` staan bewust open.**
 Zonder PIN, zonder beheercode — dat is het hele punt van een meekijk-link. De grendel is
 het token (32 hex, één tegelijk, intrekbaar). Wat naar buiten gaat wordt daarom bepaald
 door `publiekePlanning()` in `lib/delen.js`, en dat is een **witte lijst**: het bouwt een
@@ -363,6 +365,17 @@ Houd die vorm zo. Wat er bewust níét in zit: `updatedBy` (namen van het gezin)
 staan. `/bekijk` heeft geen `PinPoort` en geen enkele knop die schrijft — er staat ook geen
 opslagcode in `components/Bekijken.jsx`, en dat is makkelijker te bewaken dan een
 alleen-lezen stand van `Planner`.
+
+De tweede is **`/api/delen/dagroute`**, voor de route van één dag op de meekijkpagina. Die
+is met opzet *smal*: de bezoeker geeft **alleen een datum** mee en geen punten. De server
+zoekt zelf op wat er die dag gepland staat (`dagRouteVraag()` in `lib/delen.js`) en rekent
+dáárvan de route uit. Doe dat niet anders — accepteerde hij punten, dan was de deel-link
+een open routeserver waarmee iemand jouw ORS-quotum kan leegtrekken met ritten door heel
+Europa. Twee dingen die daar bij horen: het antwoord bevat alleen routegegevens (dus geen
+namen, notities of `routeAnkers` — de server mág de vervoerkeuze weten, de bezoeker niet),
+en het resultaat gaat in de Redis-cache, zodat vijf familieleden die dezelfde dag openen
+samen één aanvraag kosten. Het rekenwerk zelf staat in `lib/routeDienst.js`, gedeeld met
+`/api/route`, zodat de twee paden niet uit elkaar kunnen lopen.
 
 **10c. Geld staat in hele centen, als integer.**
 `lib/uitgaven.js` rekent nergens met euro's als kommagetal, want `0.1 + 0.2` is

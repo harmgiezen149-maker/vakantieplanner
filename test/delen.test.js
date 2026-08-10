@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { maakToken, tokenGeldig, magBekijken, publiekePlanning } from '../lib/delen.js';
+import {
+  maakToken, tokenGeldig, magBekijken, publiekePlanning, dagRouteVraag,
+} from '../lib/delen.js';
 
 // Deze route staat open zonder familie-PIN. Twee dingen moeten dus kloppen:
 // alleen het juiste, nog geldige token komt erlangs, en wat eruit komt bevat
@@ -129,4 +131,90 @@ test('een leeg of ontbrekend document valt niet om', () => {
 test('een kapot plan-veld levert geen rommel op', () => {
   const uit = publiekePlanning({ plan: { '2026-08-10': 'geen array' }, customActivities: [] });
   assert.deepEqual(uit.plan, {});
+});
+
+// ── De route van één dag ────────────────────────────────────────────
+//
+// De meekijker vraagt alleen om een dátum; de server zoekt zelf op wat daar
+// staat. Deze functie is dat opzoeken.
+
+const CAMPING = [48.0000, 7.2000];
+const STAD = [[48.0740, 7.3560], [48.0765, 7.3600], [48.0752, 7.3548]];
+const VER = [[48.0600, 6.9500], [48.1400, 7.2650]];
+
+const reis = (extra = {}) => ({
+  plan: {
+    '2026-08-10': ['c_a', 'c_b', 'c_c'],   // stadsdag
+    '2026-08-11': ['v_a', 'v_b'],          // rijdag
+    '2026-08-12': ['c_a'],                 // één stop
+    '2026-08-13': ['zonder_loc'],          // geen coördinaten
+  },
+  customActivities: [
+    { id: 'c_a', name: 'Parkeergarage', note: 'niet delen', coords: STAD[0] },
+    { id: 'c_b', name: 'Markthal', coords: STAD[1] },
+    { id: 'c_c', name: 'Unterlinden', coords: STAD[2] },
+    { id: 'v_a', name: 'Meer', coords: VER[0] },
+    { id: 'v_b', name: 'Dorp', coords: VER[1] },
+    { id: 'zonder_loc', name: 'Souvenirs' },
+  ],
+  locationOverrides: {},
+  tripConfig: {
+    title: 'Elzas', startDate: '2026-08-09', endDate: '2026-08-13',
+    stays: [{
+      id: 's1', name: 'Camping', startDate: '2026-08-09', endDate: '2026-08-13',
+      coords: CAMPING,
+    }],
+  },
+  ...extra,
+});
+
+test('een stadsdag gaat te voet, zonder het verblijf', () => {
+  const uit = dagRouteVraag(reis(), '2026-08-10');
+  assert.equal(uit.vervoer, 'lopen');
+  assert.deepEqual(uit.punten, STAD, 'de rit naar de stad hoort er niet bij');
+});
+
+test('een dag met verre stops gaat met de auto, mét het verblijf', () => {
+  const uit = dagRouteVraag(reis(), '2026-08-11');
+  assert.equal(uit.vervoer, 'rijden');
+  assert.deepEqual(uit.punten, [CAMPING, ...VER, CAMPING]);
+});
+
+test('een vastgelegde keuze wint van de automaat', () => {
+  const uit = dagRouteVraag(
+    reis({ routeAnkers: { '2026-08-10': { start: null, eind: null, vervoer: 'rijden' } } }),
+    '2026-08-10',
+  );
+  assert.equal(uit.vervoer, 'rijden');
+  assert.deepEqual(uit.punten, [CAMPING, ...STAD, CAMPING]);
+});
+
+test('er valt niets te tekenen bij één stop, geen stops of een onbekende dag', () => {
+  assert.equal(dagRouteVraag(reis(), '2026-08-12'), null, 'één stop te voet');
+  assert.equal(dagRouteVraag(reis(), '2026-08-13'), null, 'geen coördinaten');
+  assert.equal(dagRouteVraag(reis(), '2026-08-20'), null, 'dag bestaat niet');
+  assert.equal(dagRouteVraag(reis(), 'geen datum'), null);
+  assert.equal(dagRouteVraag(null, '2026-08-10'), null);
+});
+
+test('een override op een ingebouwde activiteit telt mee', () => {
+  const t = reis();
+  t.plan['2026-08-10'] = ['g_swim', 'c_b', 'c_c'];
+  t.locationOverrides = { g_swim: { coords: STAD[0] } };
+  const uit = dagRouteVraag(t, '2026-08-10');
+  assert.deepEqual(uit.punten[0], STAD[0], 'het eigen coördinaat van g_swim');
+});
+
+test('een ingebouwde activiteit zonder locatie levert geen punt op', () => {
+  const t = reis();
+  t.plan['2026-08-10'] = ['g_swim', 'c_b', 'c_c'];
+  const uit = dagRouteVraag(t, '2026-08-10');
+  assert.deepEqual(uit.punten, [STAD[1], STAD[2]]);
+});
+
+test('er komt niets terug behalve punten en vervoer', () => {
+  const uit = dagRouteVraag(reis(), '2026-08-10');
+  assert.deepEqual(Object.keys(uit).sort(), ['punten', 'vervoer']);
+  assert.ok(!JSON.stringify(uit).includes('niet delen'), 'geen notities');
+  assert.ok(!JSON.stringify(uit).includes('Parkeergarage'), 'geen namen');
 });
