@@ -39,6 +39,7 @@ meldingen in `errorLog.js`, de versiecontrole in `conflict.js`, de cachesleutels
 `geoCache.js`, de reisstatistiek in `reisverslag.js`, de deel-link in `delen.js`,
 het rekenwerk in `uitgaven.js`, de offline-kopie in `offline.js`,
 de bezoekkoppeling in `bezoek.js`,
+de routevolgorde in `volgorde.js`,
 de CSV-import en de
 opschoning in `stayValidation.js`.
 
@@ -114,6 +115,7 @@ app/
     checklist/  GET/POST  auto- & documentenchecklist
     geocode/    GET       Nominatim-zoeken
     route/      POST      autoroute (ORS met key, anders publieke OSRM)
+    matrix/     POST      alle onderlinge rijafstanden (voor "Slimme volgorde")
     suggest/    GET/POST  "Ontdek de omgeving" — bezienswaardigheden
     hiking/     POST      wandelroutes uit OSM-relaties
     resolve-maps/ POST    Google Maps-link → naam + coördinaten
@@ -143,7 +145,7 @@ lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
               (Maps-links + PIN), stayLog.js, stayTypes.js, backup.js, csv.js,
               bezoek.js, conflict.js, delen.js, errorLog.js, geoCache.js, packing.js,
               reisverslag.js, stayValidation.js, toegang.js, uitgaven.js,
-              weer.js, offline.js, redis.js, useRoute.js, useWeer.js
+              volgorde.js, weer.js, offline.js, redis.js, useRoute.js, useWeer.js
 ```
 
 `components/Planner.jsx` was één bestand van 4.100 regels en is opgesplitst: alle sheets
@@ -185,7 +187,7 @@ Zeven losse Redis-documenten, elk één JSON-blob:
 
 | Key | Vorm |
 | --- | --- |
-| `planner:trip` | `{ plan, customActivities, locationOverrides, tripConfig, suggestExclusions, updatedAt, updatedBy }` |
+| `planner:trip` | `{ plan, customActivities, locationOverrides, tripConfig, suggestExclusions, routeAnkers, updatedAt, updatedBy }` |
 | `planner:inpakken` | `{ categories:[{id,name}], personen:[naam], items:[{id,categoryId,label,qty,checked,packed,important,note,person}], updatedBy, updatedAt }` |
 | `planner:checklist` | `{ checked:{}, updatedBy, updatedAt }` |
 | `planner:verblijven` | `{ stays:[{id,name,locationLabel,coords,type,typeOther,country,countryCode,startDate,endDate,periodLabel,website,tripTitle,score,review,photos,bezocht,source}], updatedBy, updatedAt }` |
@@ -215,6 +217,8 @@ Kern van het hoofddocument:
   ingebouwde activiteiten uit `DEFAULT_ACTIVITIES` (`g_*`), die read-only zijn.
 - `tripConfig` = titel, `startDate`, `endDate`, `stays[]`. `buildDays(tripConfig)` leidt
   hier de dagenlijst uit af (max 90 dagen, wisseldag = dag die in twee verblijven valt).
+- `routeAnkers` = `{ 'YYYY-MM-DD': { start, eind } }`, het vaste begin- en eindpunt van
+  de route van die dag. Alleen dagen mét een anker staan erin — zie valkuil 20.
 
 ## Valkuilen
 
@@ -283,7 +287,7 @@ bezienswaardigheden is **Geoapify** (`GEOAPIFY_API_KEY`) het primaire pad en Ove
 reserve; voor wandelroute-relaties bestaat geen alternatief.
 
 Daar bovenop ligt `lib/geoCache.js`: geslaagde antwoorden van `suggest/`, `hiking/`,
-`whats-here/` en `geocode/` gaan onder `cache:v1:<naam>:<sleutel>` in Redis. Twee keer
+`whats-here/`, `geocode/` en `matrix/` gaan onder `cache:v1:<naam>:<sleutel>` in Redis. Twee keer
 dezelfde omgeving opvragen kost dus één keer Overpass, en een omgeving die je eerder
 bekeek werkt ook op een dag dat de servers nors zijn. Vier regels bij het aanhaken van
 een nieuwe route:
@@ -491,6 +495,28 @@ de nachtelijke reservekopie en het uitlezen van Maps-links het nu doen.
 De PWA is manifest + iconen, meer niet. Voeg er geen offline-caching aan toe zonder dat
 expliciet te bespreken: gecachete JS naast een gedeeld Redis-document geeft precies de
 "waarom zie ik oude data"-klasse bugs die punt 4 probeert te vermijden.
+
+**20. De slimme volgorde: ankers per dag, en een matrix die altijd dezelfde sleutel heeft.**
+"Slimme volgorde" op een dagkaart zet de activiteiten van die dag in de kortste route.
+Het rekenwerk staat in `lib/volgorde.js` (dichtstbijzijnde buur + 2-opt) en weet niets van
+fetch of React: de afstanden komen er als `kosten`-functie in. Drie dingen die vastliggen:
+
+- **De ankers staan per dag in `routeAnkers`, niet op de activiteit.** Dat gaat bewust
+  tegen valkuil 1 in: "beginpunt" is een eigenschap van de route van díé dag, niet van de
+  plek. Dezelfde parkeergarage kan dinsdag je startpunt zijn en donderdag een tussenstop.
+  Nieuw top-level veld betekent ook: valkuil 3 geldt, en die bewaar-tak staat er.
+- **Een anker is een opdracht, geen optimalisatie.** Levert het omgooien niets op, dan
+  laat `optimaliseerVolgorde` de lijst met rust — behalve als er een anker staat: dan
+  wordt dat uitgevoerd, ook als de route er langer van wordt. De gebruiker wint.
+- **De matrix wordt canoniek gesorteerd opgevraagd.** `/api/matrix` sorteert de punten
+  vóór het opvragen en draait dat daarna terug met `herstelMatrix()`. Zonder die
+  sortering krijgt dezelfde verzameling punten na elke herordening een andere
+  cachesleutel, en is elke tweede klik een misser — precies wanneer je hem nodig hebt.
+
+Mislukt `/api/matrix`, dan rekent de client hemelsbreed door en zegt dat erbij in de
+melding. Dat is geen storing maar de terugval: de knop moet het ook doen op een camping
+zonder bereik. Activiteiten zónder coördinaten kunnen niet geplaatst worden; die houden
+hun onderlinge volgorde en gaan achteraan, en de melding noemt hoeveel het er zijn.
 
 ## Stijl
 

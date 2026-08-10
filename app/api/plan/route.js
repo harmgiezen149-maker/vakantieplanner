@@ -22,6 +22,7 @@ function emptyState() {
     customActivities: [],
     locationOverrides: {},
     tripConfig: DEFAULT_TRIP_CONFIG,
+    routeAnkers: {},
     updatedAt: null,
     updatedBy: null,
     isInitial: true,
@@ -62,6 +63,23 @@ function sanitizeTripConfig(raw) {
   };
 }
 
+// Start- en eindpunt van de route per dag: { 'YYYY-MM-DD': { start, eind } }.
+// Bewust per dag en niet op de activiteit — zie de valkuil in CLAUDE.md.
+function sanitizeRouteAnkers(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const uit = {};
+  const id = (v) => (typeof v === 'string' && v ? v.slice(0, 80) : null);
+  for (const [dag, anker] of Object.entries(raw).slice(0, 90)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dag) || !anker || typeof anker !== 'object') continue;
+    const start = id(anker.start);
+    const eind = id(anker.eind);
+    // Een dag zonder ankers hoeft er niet in te staan; dat houdt het document
+    // klein en het opruimen vanzelfsprekend.
+    if (start || eind) uit[dag] = { start, eind };
+  }
+  return uit;
+}
+
 export async function GET(request) {
   const authErr = checkAuth(request);
   if (authErr) return authErr;
@@ -86,6 +104,7 @@ export async function GET(request) {
       customActivities: Array.isArray(data.customActivities) ? data.customActivities : [],
       locationOverrides: (data.locationOverrides && typeof data.locationOverrides === 'object') ? data.locationOverrides : {},
       tripConfig: sanitizeTripConfig(data.tripConfig),
+      routeAnkers: sanitizeRouteAnkers(data.routeAnkers),
       updatedAt: data.updatedAt || null,
       updatedBy: data.updatedBy || null,
       isInitial: !data.tripConfig,
@@ -131,8 +150,12 @@ export async function PUT(request) {
           }))
           .filter(e => e.name)
       : undefined;
+    let routeAnkers = body.routeAnkers !== undefined
+      ? sanitizeRouteAnkers(body.routeAnkers)
+      : undefined;
 
-    if (body.tripConfig === undefined || suggestExclusions === undefined) {
+    if (body.tripConfig === undefined || suggestExclusions === undefined
+        || routeAnkers === undefined) {
       const existing = bestaand;
       if (body.tripConfig === undefined && existing?.tripConfig) {
         tripConfig = existing.tripConfig;
@@ -140,6 +163,9 @@ export async function PUT(request) {
       if (suggestExclusions === undefined) {
         suggestExclusions = Array.isArray(existing?.suggestExclusions)
           ? existing.suggestExclusions : [];
+      }
+      if (routeAnkers === undefined) {
+        routeAnkers = sanitizeRouteAnkers(existing?.routeAnkers);
       }
     }
 
@@ -149,6 +175,7 @@ export async function PUT(request) {
       locationOverrides: (body.locationOverrides && typeof body.locationOverrides === 'object') ? body.locationOverrides : {},
       tripConfig,
       suggestExclusions,
+      routeAnkers,
       updatedAt: new Date().toISOString(),
       updatedBy: typeof body.updatedBy === 'string' ? body.updatedBy.slice(0, 40) : null,
     };

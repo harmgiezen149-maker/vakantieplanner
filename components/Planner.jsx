@@ -7,6 +7,7 @@ import {
   ChevronRight, RefreshCw, User, Wifi, WifiOff, Check, AlertCircle, MapPin, Map as MapIcon,
   Pencil, Car, ChevronUp, ChevronDown, CheckSquare, Backpack,
   Settings, CalendarRange, Compass, Star, ShieldCheck, Wallet, Crosshair,
+  Route, Loader2, Flag, Play,
 } from 'lucide-react';
 import {
   COLORS, CATEGORIES, CATEGORY_ORDER, DEFAULT_ACTIVITIES,
@@ -14,6 +15,7 @@ import {
   getMapsLink, applyLocationOverride, formatDistance, formatDuration,
 } from '@/lib/data';
 import { useRoute } from '@/lib/useRoute';
+import { optimaliseerVolgorde, kostenUitMatrix, hemelsbreed } from '@/lib/volgorde';
 import { useWeer } from '@/lib/useWeer';
 import { formatTemp } from '@/lib/weer';
 import { getPin } from '@/lib/maps';
@@ -58,7 +60,7 @@ async function apiGet() {
 
 // basisVersie is de updatedAt waarop deze wijziging is gebaseerd; laat hem weg
 // om zonder controle te schrijven ("toch de mijne opslaan" na een botsing).
-async function apiPut(plan, customActivities, locationOverrides, tripConfig, suggestExclusions, name, basisVersie) {
+async function apiPut(plan, customActivities, locationOverrides, tripConfig, suggestExclusions, routeAnkers, name, basisVersie) {
   const res = await fetch('/api/plan', {
     method: 'PUT',
     headers: {
@@ -67,7 +69,7 @@ async function apiPut(plan, customActivities, locationOverrides, tripConfig, sug
     },
     body: JSON.stringify({
       plan, customActivities, locationOverrides, tripConfig, suggestExclusions,
-      updatedBy: name || null, basisVersie,
+      routeAnkers, updatedBy: name || null, basisVersie,
     }),
   });
   if (res.status === 409) {
@@ -341,7 +343,7 @@ const TabBar = ({ active, setActive }) => (
 
 // ============ ACTIVITY CHIP ============
 
-const ActivityChip = ({ activity, dayKey, days, onRemove, onEditLocation, onMoveUp, onMoveDown, canMoveUp, canMoveDown, onUpdateProps, onMoveToDay }) => {
+const ActivityChip = ({ activity, dayKey, days, rol, onZetAnker, onRemove, onEditLocation, onMoveUp, onMoveDown, canMoveUp, canMoveDown, onUpdateProps, onMoveToDay }) => {
   const cat = CATEGORIES[activity.category] || CATEGORIES.custom;
   const mapsLink = getMapsLink(activity);
   const [open, setOpen] = useState(false);
@@ -402,6 +404,16 @@ const ActivityChip = ({ activity, dayKey, days, onRemove, onEditLocation, onMove
           display: 'flex', alignItems: 'center', gap: 5,
         }}>
           {activity.important && <span style={{ color: COLORS.sunset, fontSize: 13 }}>★</span>}
+          {/* Vast punt in de route van deze dag — zichtbaar zonder uitklappen */}
+          {rol && (
+            <span
+              title={rol === 'start' ? 'Startpunt van deze dag' : 'Eindpunt van deze dag'}
+              style={{
+                flexShrink: 0, display: 'inline-flex', alignItems: 'center',
+                color: COLORS.lake,
+              }}
+            >{rol === 'start' ? <Play size={10} fill={COLORS.lake} /> : <Flag size={11} />}</span>
+          )}
           <span style={{
             overflow: 'hidden', textOverflow: 'ellipsis',
             // Bezocht = gedaan. Doorstrepen zou "geschrapt" suggereren, dus
@@ -501,6 +513,41 @@ const ActivityChip = ({ activity, dayKey, days, onRemove, onEditLocation, onMove
           onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
         />
 
+        {onZetAnker && (
+          <>
+            <label style={chipEditLabel}>Rol in de route van deze dag</label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {[
+                { id: null, label: 'Vrij' },
+                { id: 'start', label: 'Start' },
+                { id: 'eind', label: 'Eind' },
+              ].map(r => {
+                const aan = rol === r.id;
+                return (
+                  <button
+                    key={r.label}
+                    onClick={() => onZetAnker(r.id)}
+                    style={{
+                      flex: 1, padding: '8px 6px', borderRadius: 9, cursor: 'pointer',
+                      borderWidth: 1, borderStyle: 'solid',
+                      borderColor: aan ? COLORS.lake : COLORS.hairline,
+                      background: aan ? `${COLORS.lake}18` : COLORS.cream,
+                      color: aan ? COLORS.lake : COLORS.ink,
+                      fontFamily: "'DM Sans', sans-serif", fontSize: 12.5,
+                      fontWeight: aan ? 700 : 500,
+                    }}
+                  >{r.label}</button>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 11, color: COLORS.inkLight, marginTop: 5, lineHeight: 1.45 }}>
+              “Slimme volgorde” houdt het startpunt vooraan en het eindpunt
+              achteraan — handig bij een stadsbezoek: parkeren waar je begint,
+              eten waar je eindigt.
+            </div>
+          </>
+        )}
+
         <label style={chipEditLabel}>Verplaats naar dag</label>
         <select
           style={chipEditInput}
@@ -551,10 +598,46 @@ const chipEditInput = {
 
 // ============ DAY CARD ============
 
-const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, weer, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay, onSwapDay }) => {
+const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, weer, anker, offline, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay, onSwapDay, onOptimaliseer, onZetVolgorde, onZetAnker }) => {
   const [swapping, setSwapping] = useState(false);
+  // Uitkomst van de laatste optimalisatie: { tekst, vorige } | null
+  const [slim, setSlim] = useState(null);
+  const [bezig, setBezig] = useState(false);
   const hasActivities = activities.length > 0;
   const stay = day.stay;
+
+  // Twee stops met een locatie is het minimum om iets te kunnen omgooien.
+  const teOrdenen = activities.filter(id => Array.isArray(activityById[id]?.coords)).length;
+
+  const slimmeVolgorde = async () => {
+    setBezig(true);
+    setSlim(null);
+    try {
+      const uit = await onOptimaliseer(day.key);
+      const hoe = uit.echt ? 'rijden' : 'hemelsbreed';
+      const zonder = uit.zonderLocatie
+        ? ` · ${uit.zonderLocatie} zonder locatie ${uit.zonderLocatie === 1 ? 'staat' : 'staan'} onderaan`
+        : '';
+      if (!uit.gewijzigd) {
+        setSlim({ tekst: `Dit was al de kortste volgorde${zonder}.`, vorige: null });
+      } else if (uit.na < uit.voor) {
+        setSlim({
+          tekst: `Volgorde aangepast · ${formatDistance(uit.voor)} → ${formatDistance(uit.na)} ${hoe}${zonder}`,
+          vorige: uit.vorige,
+        });
+      } else {
+        // Kan alleen met een anker: dat is een opdracht, geen optimalisatie.
+        setSlim({
+          tekst: `Volgorde volgt je start- en eindpunt · ${formatDistance(uit.na)} ${hoe}${zonder}`,
+          vorige: uit.vorige,
+        });
+      }
+    } catch {
+      setSlim({ tekst: 'Kon de volgorde nu niet berekenen.', vorige: null });
+    } finally {
+      setBezig(false);
+    }
+  };
 
   // Verzamel coords voor route-berekening
   const routePoints = useMemo(() => {
@@ -586,17 +669,18 @@ const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, 
       transition: 'all 0.2s ease',
     }}>
       <div style={{
-        display: 'flex', alignItems: 'baseline', gap: 10,
+        display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap',
         marginBottom: hasActivities ? 12 : 8,
       }}>
         <div style={{
           fontFamily: "'Fraunces', serif", fontSize: 11,
           letterSpacing: 1.5, textTransform: 'uppercase',
-          color: COLORS.inkLight, fontWeight: 500,
+          color: COLORS.inkLight, fontWeight: 500, whiteSpace: 'nowrap',
         }}>{day.dayShort}</div>
         <div style={{
           fontFamily: "'Fraunces', serif", fontSize: 22,
           color: COLORS.forest, fontWeight: 500, letterSpacing: '-0.01em',
+          whiteSpace: 'nowrap',
         }}>{day.date}</div>
         {weer && (
           <span
@@ -624,22 +708,55 @@ const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, 
             background: 'rgba(58, 126, 132, 0.10)', borderRadius: 99,
           }}>{day.label}</div>
         )}
+        {/* De twee knoppen samen in één blok: past het niet naast de datum,
+            dan wippen ze samen naar de volgende regel in plaats van de
+            datum in tweeën te breken. */}
         {hasActivities && (
-          <button
-            onClick={() => setSwapping(s => !s)}
-            title="Wissel deze dag met een andere dag"
-            style={{
-              marginLeft: day.label ? 8 : 'auto',
-              border: `1px solid ${swapping ? COLORS.forest : COLORS.hairline}`,
-              background: swapping ? `${COLORS.forest}12` : 'transparent',
-              color: swapping ? COLORS.forest : COLORS.inkLight,
-              borderRadius: 99, padding: '4px 10px', cursor: 'pointer',
-              fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600,
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-            }}
-          >
-            <RefreshCw size={12} /> Wissel dag
-          </button>
+          <div style={{
+            display: 'flex', gap: 6, marginLeft: 'auto', flexShrink: 0,
+            alignItems: 'center',
+          }}>
+            {teOrdenen >= 2 && (
+              <button
+                onClick={slimmeVolgorde}
+                disabled={bezig || offline}
+                title={offline
+                  ? 'Geen verbinding — de volgorde wordt niet opgeslagen'
+                  : 'Zet de activiteiten in de kortste route'}
+                style={{
+                  border: `1px solid ${COLORS.lake}`,
+                  background: 'rgba(58, 126, 132, 0.08)',
+                  color: COLORS.lake,
+                  borderRadius: 99, padding: '4px 10px',
+                  cursor: bezig || offline ? 'default' : 'pointer',
+                  opacity: offline ? 0.45 : 1,
+                  fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600,
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {bezig
+                  ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                  : <Route size={12} />}
+                {bezig ? 'Rekenen…' : 'Slimme volgorde'}
+              </button>
+            )}
+            <button
+              onClick={() => setSwapping(s => !s)}
+              title="Wissel deze dag met een andere dag"
+              style={{
+                border: `1px solid ${swapping ? COLORS.forest : COLORS.hairline}`,
+                background: swapping ? `${COLORS.forest}12` : 'transparent',
+                color: swapping ? COLORS.forest : COLORS.inkLight,
+                borderRadius: 99, padding: '4px 10px', cursor: 'pointer',
+                fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600,
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <RefreshCw size={12} /> Wissel dag
+            </button>
+          </div>
         )}
       </div>
 
@@ -674,6 +791,35 @@ const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, 
               );
             })}
           </div>
+        </div>
+      )}
+
+      {slim && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+          marginBottom: 10, padding: '7px 10px', borderRadius: 8,
+          background: 'rgba(74, 111, 79, 0.10)',
+          fontSize: 11.5, color: COLORS.moss, fontWeight: 600, lineHeight: 1.45,
+        }}>
+          <span style={{ flex: 1, minWidth: 0 }}>{slim.tekst}</span>
+          {slim.vorige && (
+            <button
+              onClick={() => { onZetVolgorde(day.key, slim.vorige); setSlim(null); }}
+              style={{
+                border: 'none', background: 'transparent', padding: 0, cursor: 'pointer',
+                color: COLORS.forest, fontFamily: "'DM Sans', sans-serif",
+                fontSize: 11.5, fontWeight: 700, textDecoration: 'underline',
+              }}
+            >Ongedaan maken</button>
+          )}
+          <button
+            onClick={() => setSlim(null)}
+            aria-label="Melding wegklikken"
+            style={{
+              border: 'none', background: 'transparent', cursor: 'pointer',
+              color: COLORS.inkLight, padding: 0, display: 'flex',
+            }}
+          ><X size={13} /></button>
         </div>
       )}
 
@@ -741,6 +887,8 @@ const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, 
                   activity={activity}
                   dayKey={day.key}
                   days={allDays}
+                  rol={anker?.start === actId ? 'start' : anker?.eind === actId ? 'eind' : null}
+                  onZetAnker={(r) => onZetAnker(day.key, actId, r)}
                   onRemove={() => onRemove(day.key, idx)}
                   onEditLocation={onEditLocation}
                   onMoveUp={() => onMove(day.key, idx, idx - 1)}
@@ -777,7 +925,7 @@ const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, 
 
 // ============ PLAN VIEW ============
 
-const PlanView = ({ days, plan, activityById, weerPerDag, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay, onSwapDay, onOpenTripSettings }) => {
+const PlanView = ({ days, plan, activityById, weerPerDag, routeAnkers, offline, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay, onSwapDay, onOptimaliseer, onZetVolgorde, onZetAnker, onOpenTripSettings }) => {
   if (days.length === 0) {
     return (
       <div style={{ padding: '40px 20px 100px', textAlign: 'center' }}>
@@ -813,6 +961,11 @@ const PlanView = ({ days, plan, activityById, weerPerDag, onAddClick, onRemove, 
           activityById={activityById}
           plan={plan}
           weer={weerPerDag?.[day.key]}
+          anker={routeAnkers?.[day.key] || null}
+          offline={offline}
+          onOptimaliseer={onOptimaliseer}
+          onZetVolgorde={onZetVolgorde}
+          onZetAnker={onZetAnker}
           onAddClick={onAddClick}
           onRemove={onRemove}
           onEditLocation={onEditLocation}
@@ -1136,6 +1289,8 @@ export default function Planner() {
   const [locationOverrides, setLocationOverrides] = useState({});
   // Suggesties die de gebruiker heeft verborgen: [{ name, coords }]
   const [suggestExclusions, setSuggestExclusions] = useState([]);
+  // Start- en eindpunt van de route, per dag: { dagKey: { start, eind } }
+  const [routeAnkers, setRouteAnkers] = useState({});
   const [tripConfig, setTripConfig] = useState(DEFAULT_TRIP_CONFIG);
   const [loading, setLoading] = useState(true);
   const [sheet, setSheet] = useState(null);
@@ -1175,6 +1330,7 @@ export default function Planner() {
       setCustomActivities(data.customActivities || []);
       setLocationOverrides(data.locationOverrides || {});
       setSuggestExclusions(data.suggestExclusions || []);
+      setRouteAnkers(data.routeAnkers || {});
       setTripConfig(data.tripConfig || DEFAULT_TRIP_CONFIG);
       setServerUpdate({ at: data.updatedAt, by: data.updatedBy });
       setSyncStatus('synced');
@@ -1200,6 +1356,7 @@ export default function Planner() {
           setCustomActivities(kopie.data.customActivities || []);
           setLocationOverrides(kopie.data.locationOverrides || {});
           setSuggestExclusions(kopie.data.suggestExclusions || []);
+          setRouteAnkers(kopie.data.routeAnkers || {});
           setTripConfig(kopie.data.tripConfig || DEFAULT_TRIP_CONFIG);
           setServerUpdate({ at: kopie.data.updatedAt, by: kopie.data.updatedBy });
           setOfflineOp(kopie.op);
@@ -1237,8 +1394,8 @@ export default function Planner() {
     saveTimer.current = setTimeout(async () => {
       try {
         const data = await apiPut(
-          plan, customActivities, locationOverrides, tripConfig, suggestExclusions, name,
-          versie.current,
+          plan, customActivities, locationOverrides, tripConfig, suggestExclusions,
+          routeAnkers, name, versie.current,
         );
         versie.current = data.updatedAt ?? null;
         setServerUpdate({ at: data.updatedAt, by: data.updatedBy });
@@ -1256,7 +1413,7 @@ export default function Planner() {
       }
     }, 500);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [plan, customActivities, locationOverrides, tripConfig, suggestExclusions, name, loading, offlineOp]);
+  }, [plan, customActivities, locationOverrides, tripConfig, suggestExclusions, routeAnkers, name, loading, offlineOp]);
 
   // Dynamische dagenlijst uit de reisconfiguratie
   const days = useMemo(() => buildDays(tripConfig), [tripConfig]);
@@ -1311,6 +1468,89 @@ export default function Planner() {
       const [moved] = ids.splice(fromIdx, 1);
       ids.splice(toIdx, 0, moved);
       return { ...p, [dayKey]: ids };
+    });
+  };
+
+  // ── Slimme volgorde ───────────────────────────────────────────────
+  //
+  // De activiteiten van één dag in de kortste route zetten. De onderlinge
+  // rijafstanden komen van /api/matrix; is die niet bereikbaar — geen bereik,
+  // server nors — dan rekent `optimaliseerVolgorde` hemelsbreed door. De knop
+  // moet het ook doen op een camping zonder streepje bereik.
+  const haalMatrix = async (punten) => {
+    try {
+      const res = await fetch('/api/matrix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Family-Pin': getPin() },
+        body: JSON.stringify({ points: punten }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      // Afstand is waar we op sorteren; kent de dienst alleen rijtijd, dan is
+      // die net zo bruikbaar — het gaat om de onderlinge verhouding.
+      return data.distances || data.durations || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const optimaliseerDag = async (dayKey) => {
+    const dag = days.find(d => d.key === dayKey);
+    const ids = plan[dayKey] || [];
+    const items = ids.map(id => ({ id, coords: activityById[id]?.coords || null }));
+    const anker = routeAnkers[dayKey] || {};
+
+    // De punten die de matrix moet kennen: het verblijf hoort erbij, want de
+    // rit ernaartoe telt mee in de route.
+    const punten = [
+      ...(dag?.startCoords ? [dag.startCoords] : []),
+      ...items.filter(x => Array.isArray(x.coords)).map(x => x.coords),
+      ...(dag?.endCoords ? [dag.endCoords] : []),
+    ];
+
+    const matrix = punten.length >= 2 && punten.length <= 25
+      ? await haalMatrix(punten)
+      : null;
+
+    const uit = optimaliseerVolgorde(items, {
+      begin: dag?.startCoords || null,
+      eind: dag?.endCoords || null,
+      start: anker.start || null,
+      stop: anker.eind || null,
+      kosten: matrix ? kostenUitMatrix(punten, matrix) : hemelsbreed,
+    });
+
+    const gewijzigd = uit.ids.some((id, i) => id !== ids[i]);
+    if (gewijzigd) setPlan(p => ({ ...p, [dayKey]: uit.ids }));
+    return { ...uit, gewijzigd, echt: Boolean(matrix), vorige: ids };
+  };
+
+  // Terugzetten na "Ongedaan maken"
+  const zetVolgorde = (dayKey, ids) => {
+    setPlan(p => ({ ...p, [dayKey]: [...ids] }));
+  };
+
+  // Start- of eindpunt van een dag aanwijzen. Eén van elk per dag: een nieuwe
+  // keuze haalt het anker bij de vorige activiteit vanzelf weg, omdat er maar
+  // één id per rol wordt bewaard. Dezelfde activiteit kan geen start én eind
+  // zijn — dan zou het vrije stuk van de route om zichzelf heen lopen.
+  const zetAnker = (dayKey, activityId, rol) => {
+    setRouteAnkers(a => {
+      const huidig = a[dayKey] || { start: null, eind: null };
+      const nieuw = { ...huidig };
+      if (rol === 'start') nieuw.start = huidig.start === activityId ? null : activityId;
+      else if (rol === 'eind') nieuw.eind = huidig.eind === activityId ? null : activityId;
+      else {
+        if (huidig.start === activityId) nieuw.start = null;
+        if (huidig.eind === activityId) nieuw.eind = null;
+      }
+      if (rol === 'start' && nieuw.eind === activityId) nieuw.eind = null;
+      if (rol === 'eind' && nieuw.start === activityId) nieuw.start = null;
+
+      const volgende = { ...a };
+      if (!nieuw.start && !nieuw.eind) delete volgende[dayKey];
+      else volgende[dayKey] = nieuw;
+      return volgende;
     });
   };
 
@@ -1444,6 +1684,7 @@ export default function Planner() {
     setCustomActivities([]);
     setLocationOverrides({});
     setSuggestExclusions([]);
+    setRouteAnkers({});
     setTripConfig(DEFAULT_TRIP_CONFIG);
     // Open daarna direct de reisinstellingen
     setTimeout(() => setSheet({ type: 'trip-settings' }), 0);
@@ -1591,6 +1832,11 @@ export default function Planner() {
             plan={plan}
             activityById={activityById}
             weerPerDag={weerPerDag}
+            routeAnkers={routeAnkers}
+            offline={Boolean(offlineOp)}
+            onOptimaliseer={optimaliseerDag}
+            onZetVolgorde={zetVolgorde}
+            onZetAnker={zetAnker}
             onAddClick={(dayKey) => setSheet({ type: 'pick-activity', dayKey })}
             onRemove={removeFromDay}
             onEditLocation={(act) => setSheet({ type: 'edit-location', activityId: act.id })}
