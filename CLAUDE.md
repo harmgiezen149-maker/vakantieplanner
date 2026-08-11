@@ -107,6 +107,7 @@ app/
   bekijk/page.jsx         → Bekijken       (alleen-lezen deel-link, zonder PIN)
   uitgaven/page.jsx       → Uitgaven       (kasboek: per categorie en per persoon)
   beheer/page.jsx         → Beheer         (kopieën, fouten, opruimen — eigen wachtwoord)
+  uitleg/page.jsx         → Uitleg         (handleiding in 17 punten; statisch)
   reservekopie/, fouten/  → sturen door naar /beheer (oude bladwijzers)
   layout.jsx, manifest.js, icon.svg, globals.css   (PWA + huisstijl)
   api/
@@ -140,7 +141,7 @@ components/   Planner.jsx (planscherm), MapView.jsx, DayOverview.jsx,
               Poort.jsx (PinPoort + BeheerPoort), ConflictMelding.jsx,
               OfflineMelding.jsx, Foutmelder.jsx, VersieWacht.jsx,
               Reisverslag.jsx, Uitgaven.jsx,
-              Bekijken.jsx, DeelLink.jsx
+              Bekijken.jsx, DeelLink.jsx, Uitleg.jsx
   planner/    de sheets van het planscherm — zie hieronder
 lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
               (Maps-links + PIN), stayLog.js, stayTypes.js, backup.js, csv.js,

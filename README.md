@@ -254,6 +254,11 @@ Na lokale aanpassing → `git commit` + `git push` → Vercel deployt automatisc
 
 Bij eerste bezoek: vul je naam in (achter het persoontje 👤). Dan zien anderen wie wat heeft gewijzigd via de "Laatst bijgewerkt door…" indicator.
 
+**In de app zit een handleiding.** Onder **Uitleg** in het menu (of op `/uitleg`) staat in
+zeventien punten wat de app allemaal kan, met nagebouwde voorbeelden en een knop naar het
+echte scherm bij elk punt. Handig om door te sturen naar wie nieuw is — al heeft die dan
+wel de familie-PIN nodig.
+
 ## Licentie
 
 MIT — doe ermee wat je wilt.
