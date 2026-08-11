@@ -102,15 +102,7 @@ export default function Reisverslag() {
           <div style={S.balken}>
             {(() => {
               const max = Math.max(...verslag.jaren.map(j => j.nachten), 1);
-              return verslag.jaren.map(j => (
-                <div key={j.jaar} style={S.balkRij}>
-                  <span style={S.balkLabel}>{j.jaar}</span>
-                  <span style={S.balkSpoor}>
-                    <span style={{ ...S.balkVulling, width: `${Math.round((j.nachten / max) * 100)}%` }} />
-                  </span>
-                  <span style={S.balkGetal}>{j.nachten}&thinsp;n</span>
-                </div>
-              ));
+              return verslag.jaren.map(j => <Jaarbalk key={j.jaar} jaar={j} max={max} />);
             })()}
           </div>
         </Blok>
@@ -167,6 +159,60 @@ const Tegel = ({ icoon, getal, label }) => (
     <span style={S.tegelLabel}>{label}</span>
   </div>
 );
+
+// Eén jaar in de "Per jaar"-balk, opgedeeld naar reis.
+//
+// Waarom niet één massieve balk: een jaar met 27 nachten kunnen twee losse
+// vakanties zijn geweest, en dat is precies wat je wilt terugzien. De tinten
+// wisselen per stukje binnen het jaar, zodat aangrenzende reizen altijd van
+// elkaar te onderscheiden zijn; de namen staan eronder in dezelfde volgorde,
+// want een gekleurde balk zonder legenda is een raadsel.
+const REIS_TINTEN = [COLORS.forest, '#6E9A72', COLORS.moss, '#94B58C'];
+
+const Jaarbalk = ({ jaar, max }) => {
+  const delen = jaar.delen?.length ? jaar.delen : [{ id: 'x', naam: '', nachten: jaar.nachten }];
+  const gesplitst = jaar.nachten > 0 && delen.length > 1;
+
+  return (
+    <div>
+      <div style={S.balkRij}>
+        <span style={S.balkLabel}>{jaar.jaar}</span>
+        <span style={S.balkSpoor}>
+          <span style={{
+            display: 'flex', height: '100%', width: `${Math.round((jaar.nachten / max) * 100)}%`,
+            borderRadius: 99, overflow: 'hidden',
+          }}>
+            {delen.map((deel, i) => (
+              <span
+                key={deel.id}
+                title={`${deel.naam}: ${deel.nachten} ${deel.nachten === 1 ? 'nacht' : 'nachten'}`}
+                style={{
+                  display: 'block', height: '100%',
+                  flex: `${Math.max(deel.nachten, 0)} 0 0`,
+                  background: REIS_TINTEN[i % REIS_TINTEN.length],
+                  // Een haarlijntje ertussen, anders lopen twee tinten in elkaar
+                  // over bij smalle stukjes.
+                  borderLeft: i > 0 ? `1px solid ${COLORS.creamSoft}` : 'none',
+                }}
+              />
+            ))}
+          </span>
+        </span>
+        <span style={S.balkGetal}>{jaar.nachten}&thinsp;n</span>
+      </div>
+      {gesplitst && (
+        <div style={S.jaarLegenda}>
+          {delen.map((deel, i) => (
+            <span key={deel.id} style={S.jaarLegendaItem}>
+              <span style={{ ...S.jaarStip, background: REIS_TINTEN[i % REIS_TINTEN.length] }} />
+              {deel.naam} <span style={{ color: COLORS.inkLight }}>{deel.nachten}&thinsp;n</span>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const Blok = ({ kop, children }) => (
   <section style={{ marginTop: 22 }}>
@@ -237,6 +283,12 @@ const S = {
   },
   balkVulling: { display: 'block', height: '100%', background: COLORS.moss, borderRadius: 99 },
   balkGetal: { minWidth: 30, textAlign: 'right', color: COLORS.inkLight, fontVariantNumeric: 'tabular-nums' },
+  jaarLegenda: {
+    display: 'flex', flexWrap: 'wrap', gap: '2px 12px',
+    margin: '3px 0 2px 127px', fontSize: 11, color: COLORS.ink,
+  },
+  jaarLegendaItem: { display: 'inline-flex', alignItems: 'center', gap: 5 },
+  jaarStip: { width: 8, height: 8, borderRadius: 3, display: 'inline-block' },
   reis: {
     background: COLORS.creamSoft, border: `1px solid ${COLORS.hairline}`,
     borderRadius: 13, padding: '12px 14px',

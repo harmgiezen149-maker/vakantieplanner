@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildDays, isTripConfigured, applyLocationOverride, formatDateRange,
   formatPeriod, getMapsLink, formatDistance, formatDuration, staysWithColors,
+  huidigVerblijf, verblijfPerActiviteit,
 } from '../lib/data.js';
 
 const reis = (over = {}) => ({
@@ -127,4 +128,71 @@ test('Maps-link valt terug op coördinaten als er geen zoekterm is', () => {
   assert.match(getMapsLink({ name: 'X', mapsQuery: 'Camping X' }), /query=Camping%20X/);
   assert.match(getMapsLink({ name: 'X', coords: [48.07, 6.87] }), /query=48\.07,6\.87/);
   assert.equal(getMapsLink({ name: 'X' }), null);
+});
+
+// ── Welk verblijf is "nu"? ──────────────────────────────────────────
+
+const V = [
+  { id: 'a', name: 'Camping A', startDate: '2026-08-01', endDate: '2026-08-08', coords: [48.00, 7.00] },
+  { id: 'b', name: 'Camping B', startDate: '2026-08-08', endDate: '2026-08-15', coords: [48.00, 8.00] },
+];
+
+test('vandaag binnen een verblijf geeft dat verblijf', () => {
+  assert.equal(huidigVerblijf(V, '2026-08-03').id, 'a');
+  assert.equal(huidigVerblijf(V, '2026-08-12').id, 'b');
+});
+
+test('op een wisseldag wint het verblijf dat begint', () => {
+  // 8 augustus valt in allebei; die dag rijd je naar B, dus daar wil je weten
+  // wat er in de buurt is.
+  assert.equal(huidigVerblijf(V, '2026-08-08').id, 'b');
+});
+
+test('vóór de reis het eerste verblijf, erna het laatste', () => {
+  assert.equal(huidigVerblijf(V, '2026-07-01').id, 'a');
+  assert.equal(huidigVerblijf(V, '2026-12-25').id, 'b');
+});
+
+test('de volgorde van de invoer maakt niet uit', () => {
+  assert.equal(huidigVerblijf([V[1], V[0]], '2026-08-03').id, 'a');
+});
+
+test('zonder verblijven of zonder datum valt huidigVerblijf niet om', () => {
+  assert.equal(huidigVerblijf([], '2026-08-03'), null);
+  assert.equal(huidigVerblijf(null, '2026-08-03'), null);
+  assert.equal(huidigVerblijf([{ id: 'x' }], '2026-08-03'), null, 'zonder begindatum telt niet mee');
+  assert.equal(huidigVerblijf(V, 'onzin').id, 'a', 'zonder bruikbare datum: de eerste');
+});
+
+// ── Bij welk verblijf hoort een activiteit? ─────────────────────────
+
+test('elke activiteit gaat naar het dichtstbijzijnde verblijf', () => {
+  const acts = [
+    { id: 'bij_a', coords: [48.01, 7.02] },
+    { id: 'bij_b', coords: [47.98, 7.95] },
+    { id: 'midden_maar_net_a', coords: [48.00, 7.49] },
+  ];
+  const uit = verblijfPerActiviteit(acts, V);
+  assert.equal(uit.bij_a, 'a');
+  assert.equal(uit.bij_b, 'b');
+  assert.equal(uit.midden_maar_net_a, 'a');
+});
+
+test('zonder coördinaten hoort een activiteit nergens bij', () => {
+  const uit = verblijfPerActiviteit([{ id: 'x' }, { id: 'y', coords: [48] }], V);
+  assert.equal(uit.x, null);
+  assert.equal(uit.y, null);
+});
+
+test('zonder verblijven met locatie hoort alles nergens bij', () => {
+  const uit = verblijfPerActiviteit([{ id: 'x', coords: [48, 7] }], [{ id: 'a' }]);
+  assert.equal(uit.x, null);
+  assert.deepEqual(verblijfPerActiviteit([], V), {});
+});
+
+test('met één verblijf hoort alles daarbij', () => {
+  const uit = verblijfPerActiviteit(
+    [{ id: 'ver_weg', coords: [52.37, 4.90] }], [V[0]],
+  );
+  assert.equal(uit.ver_weg, 'a');
 });

@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { groepeerReizen, tripStayId, stayFromTripStay } from '../lib/stayLog.js';
+import {
+  groepeerReizen, tripStayId, stayFromTripStay, hernoemReis,
+} from '../lib/stayLog.js';
 import { stayTypeLabel, countryFlag, STAY_TYPES } from '../lib/stayTypes.js';
 import { sanitizeStay, schoneWebsite } from '../lib/stayValidation.js';
 
@@ -196,4 +198,55 @@ test('de website gaat mee door de opschoning van een verblijf', () => {
   assert.equal(sanitizeStay({ website: 'example.com' }).website, 'https://example.com/');
   assert.equal(sanitizeStay({ website: 'javascript:alert(1)' }).website, null);
   assert.equal(sanitizeStay({}).website, null);
+});
+
+// ── Een reis hernoemen ──────────────────────────────────────────────
+//
+// Reizen zijn afgeleid en hebben geen id in het datamodel; de naam belandt
+// daarom als tripTitle op de verblijven zelf.
+
+const logboek = () => ([
+  { id: 's1', name: 'Camping Oslo', startDate: '2019-07-05', endDate: '2019-07-12' },
+  { id: 's2', name: 'Camping Bergen', startDate: '2019-07-12', endDate: '2019-07-20' },
+  { id: 's3', name: 'Camping Lille', startDate: '2019-09-01', endDate: '2019-09-05' },
+]);
+
+test('hernoemen zet de titel op alle verblijven van die reis', () => {
+  const lijst = logboek();
+  const reis = groepeerReizen(lijst)[0];
+  const uit = hernoemReis(lijst, reis.id, 'Noorwegen 2019');
+  assert.deepEqual(uit.map(s => s.tripTitle ?? null), ['Noorwegen 2019', 'Noorwegen 2019', null]);
+  assert.equal(groepeerReizen(uit)[0].naam, 'Noorwegen 2019');
+});
+
+test('de andere reizen blijven ongemoeid', () => {
+  const lijst = logboek();
+  const reis = groepeerReizen(lijst)[0];
+  const uit = hernoemReis(lijst, reis.id, 'Noorwegen 2019');
+  assert.equal(uit[2].name, 'Camping Lille');
+  assert.ok(!uit[2].tripTitle, 'het verblijf van de andere reis krijgt geen titel');
+  assert.equal(groepeerReizen(uit)[1].naam, 'sep 2019', 'afgeleide naam blijft');
+});
+
+test('een lege naam brengt de afgeleide naam terug', () => {
+  const lijst = hernoemReis(logboek(), groepeerReizen(logboek())[0].id, 'Noorwegen 2019');
+  const terug = hernoemReis(lijst, groepeerReizen(lijst)[0].id, '   ');
+  assert.equal(terug[0].tripTitle, null);
+  assert.equal(groepeerReizen(terug)[0].naam, 'jul 2019');
+});
+
+test('een onbekend reis-id verandert niets', () => {
+  const lijst = logboek();
+  assert.deepEqual(hernoemReis(lijst, 'bestaat_niet', 'Iets'), lijst);
+});
+
+test('twee aansluitende reizen verschillende namen geven trekt ze uit elkaar', () => {
+  // Zonder titels plakt de automaat deze twee aan elkaar (gat van 1 dag).
+  const aaneen = [
+    { id: 'x', name: 'Eerste', startDate: '2026-08-01', endDate: '2026-08-05' },
+    { id: 'y', name: 'Tweede', startDate: '2026-08-06', endDate: '2026-08-10' },
+  ];
+  assert.equal(groepeerReizen(aaneen).length, 1, 'eerst één reis');
+  const gesplitst = aaneen.map(s => (s.id === 'y' ? { ...s, tripTitle: 'Tweede reis' } : { ...s, tripTitle: 'Eerste reis' }));
+  assert.equal(groepeerReizen(gesplitst).length, 2);
 });

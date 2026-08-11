@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Car, Download, Check,
-  Maximize2, Minimize2, Footprints,
+  Maximize2, Minimize2, Footprints, ListChecks,
 } from 'lucide-react';
 import {
   COLORS, CATEGORIES, DEFAULT_ACTIVITIES,
@@ -22,6 +22,13 @@ import { bewaarLokaal, leesLokaal } from '@/lib/offline';
 const getPin = () => {
   if (typeof window === 'undefined') return '';
   return localStorage.getItem('planner-pin') || '';
+};
+
+// Vandaag in de tijdzone van het apparaat, niet in UTC — anders is het hier
+// tussen middernacht en twee uur 's nachts nog "gisteren".
+const vandaagKey = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
 // Bouw een GPX-bestand uit de route-geometrie en download het.
@@ -362,11 +369,14 @@ export default function DayOverview() {
     })();
   }, []);
 
-  // Standaard: vandaag (als die binnen de reis valt), anders de eerste dag
+  // Welke dag openen we? Eerst ?dag=YYYY-MM-DD uit het adres — daarmee springt
+  // de planning naar precies deze dag. Anders vandaag, en anders de eerste dag.
   useEffect(() => {
     if (dayIndex !== null || days.length === 0) return;
-    const todayKey = new Date().toISOString().slice(0, 10);
-    const idx = days.findIndex(d => d.key === todayKey);
+    const gevraagd = new URLSearchParams(window.location.search).get('dag');
+    const uitUrl = gevraagd ? days.findIndex(d => d.key === gevraagd) : -1;
+    if (uitUrl >= 0) { setDayIndex(uitUrl); return; }
+    const idx = days.findIndex(d => d.key === vandaagKey());
     setDayIndex(idx >= 0 ? idx : 0);
   }, [days, dayIndex]);
 
@@ -479,12 +489,31 @@ export default function DayOverview() {
       background: COLORS.cream, minHeight: '100vh',
     }}>
       <div style={{ maxWidth: 720, margin: '0 auto', padding: '18px 20px 60px' }}>
-        <Link href="/" style={{
-          color: COLORS.forest, fontSize: 14, textDecoration: 'none',
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-        }}>
-          <ArrowLeft size={16} /> Planner
-        </Link>
+        {/* Terug naar de planning, en dan naar dezelfde dag: dat is precies
+            het heen-en-weer waar je bij het plannen op vastloopt. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <Link href="/" style={{
+            color: COLORS.forest, fontSize: 14, textDecoration: 'none',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+          }}>
+            <ArrowLeft size={16} /> Planner
+          </Link>
+          {day && (
+            <Link
+              href={`/?dag=${day.key}`}
+              title="Deze dag openen in de planning"
+              style={{
+                marginLeft: 'auto',
+                border: `1px solid ${COLORS.hairline}`, borderRadius: 99,
+                padding: '4px 11px', textDecoration: 'none',
+                color: COLORS.inkLight, fontSize: 12, fontWeight: 600,
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+              }}
+            >
+              <ListChecks size={13} /> In de planning
+            </Link>
+          )}
+        </div>
 
         {offlineOp && (
           <div style={{ marginTop: 16 }}>

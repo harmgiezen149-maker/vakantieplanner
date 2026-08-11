@@ -40,6 +40,8 @@ meldingen in `errorLog.js`, de versiecontrole in `conflict.js`, de cachesleutels
 het rekenwerk in `uitgaven.js`, de offline-kopie in `offline.js`,
 de bezoekkoppeling in `bezoek.js`,
 de routevolgorde in `volgorde.js`,
+het hernoemen van een reis in `stayLog.js`,
+het huidige verblijf en de activiteiten eromheen in `data.js`,
 de CSV-import en de
 opschoning in `stayValidation.js`.
 
@@ -49,7 +51,11 @@ Twee dingen om te weten als je tests toevoegt:
   de browser tegen een Redis-stub. Wil je iets uit een component testbaar maken, haal het
   dan eerst naar `lib/` — zo zijn `packing.js` en `stayValidation.js` ontstaan.
 - **`lib/`-modules importeren elkaar relatief** (`./data.js`), niet via `@/lib/…`. De
-  padalias is van Next; plain Node kent hem niet en de tests draaien buiten Next om. De build slaagt zonder Redis-env-vars (je ziet dan alleen
+  padalias is van Next; plain Node kent hem niet en de tests draaien buiten Next om.
+  De afhankelijkheid loopt één kant op: `data.js` gebruikt `hemelsbreed()` uit
+  `volgorde.js` (voor `verblijfPerActiviteit`), en `volgorde.js` importeert niets. Houd
+  dat zo, anders krijg je een kringloop die pas op runtime opvalt.
+  De build slaagt zonder Redis-env-vars (je ziet dan alleen
 `[Upstash Redis] Unable to find environment variable` tijdens page-data-collectie); de
 API's falen dan pas op runtime.
 
@@ -417,7 +423,18 @@ een verblijf aan, dan verschuift de groepering vanzelf. Groeperen gebeurt op de 
 lijst en niet op de gefilterde: anders hakt een filter een reis in stukken. De route op de
 kaart is een rechte lijn tussen de verblijven in datumvolgorde, geen echte rijroute.
 
+**Een reis een eigen naam geven verandert daar niets aan.** `hernoemReis()` schrijft de
+naam als `tripTitle` op **alle** verblijven van de groep — er komt dus géén reis-id bij,
+en dat moet zo blijven. Twee gevolgen die je moet kennen: een lege naam wist het veld en
+de afgeleide naam ("jul 2019") komt terug, en twee aaneensluitende groepen met
+**verschillende** titels worden nooit samengevoegd. Dat laatste is geen bijwerking maar de
+manier om twee vakanties die de automaat aan elkaar plakte alsnog los te trekken.
+
 `lib/reisverslag.js` bouwt daarop voort en telt niets zelf op wat het datamodel al weet.
+De jaren komen er uitgesplitst uit (`jaren[].delen`, één stukje per reis) zodat de balk op
+`/verslag` laat zien dat een jaar van 27 nachten twee losse vakanties waren; die stukjes
+worden per reisgroep geteld en tellen per jaar exact op tot hetzelfde totaal — er is een
+test die dat voor elk jaar nagaat.
 Twee keuzes die daarin vastliggen en die je moet kennen voor je de cijfers aanpast: een
 nacht hoort bij de dag waaróp je slaapt (10 t/m 14 augustus = 4 nachten, zoals een
 camping rekent), en een verblijf **zonder cijfer telt wel mee als verblijf maar niet in

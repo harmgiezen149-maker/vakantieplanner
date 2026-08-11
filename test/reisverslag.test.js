@@ -214,3 +214,81 @@ test('een gemiddelde wordt op één decimaal afgerond', () => {
   ]);
   assert.equal(v2.totaal.gemiddeldCijfer, 7.5);
 });
+
+// ── Per jaar uitgesplitst naar reis ─────────────────────────────────
+//
+// Een jaar met twee vakanties toont op /verslag één balk; die moet je kunnen
+// opdelen, anders zie je niet dat het twee reizen waren.
+
+const jaarVan = (verslag, jaar) => verslag.jaren.find(j => j.jaar === jaar);
+
+test('twee reizen in één jaar geven twee delen die samen het jaartotaal zijn', () => {
+  const verslag = maakVerslag([
+    { id: 'a', name: 'Noorwegen', startDate: '2019-07-05', endDate: '2019-07-12' },  // 7 nachten
+    { id: 'b', name: 'Ardennen', startDate: '2019-09-01', endDate: '2019-09-05' },   // 4 nachten
+  ]);
+  const j = jaarVan(verslag, 2019);
+  assert.equal(j.nachten, 11);
+  assert.equal(j.delen.length, 2);
+  assert.equal(j.delen.reduce((n, d) => n + d.nachten, 0), j.nachten);
+  assert.deepEqual(j.delen.map(d => d.nachten), [7, 4], 'chronologisch');
+  assert.deepEqual(j.delen.map(d => d.naam), ['jul 2019', 'sep 2019']);
+});
+
+test('verblijven van dezelfde reis vallen samen in één deel', () => {
+  const verslag = maakVerslag([
+    { id: 'a', name: 'Oslo', startDate: '2019-07-05', endDate: '2019-07-12' },
+    { id: 'b', name: 'Bergen', startDate: '2019-07-12', endDate: '2019-07-20' },
+  ]);
+  const j = jaarVan(verslag, 2019);
+  assert.equal(j.delen.length, 1, 'één reis, dus één stuk');
+  assert.equal(j.delen[0].nachten, 15);
+});
+
+test('een reis over oud en nieuw levert in allebei de jaren een deel', () => {
+  const verslag = maakVerslag([
+    { id: 'a', name: 'Oud en nieuw', startDate: '2025-12-28', endDate: '2026-01-04' },
+  ]);
+  assert.equal(jaarVan(verslag, 2025).delen.length, 1);
+  assert.equal(jaarVan(verslag, 2026).delen.length, 1);
+  assert.equal(jaarVan(verslag, 2025).delen[0].nachten, 4);
+  assert.equal(jaarVan(verslag, 2026).delen[0].nachten, 3);
+  assert.equal(
+    jaarVan(verslag, 2025).delen[0].id, jaarVan(verslag, 2026).delen[0].id,
+    'dezelfde reis aan weerskanten van de jaarwisseling',
+  );
+});
+
+test('een verblijf uit het hoofd geeft een deel van nul nachten', () => {
+  const verslag = maakVerslag([
+    { id: 'oud', name: 'Camping Bouillon', periodLabel: 'zomer 2003' },
+  ]);
+  const j = jaarVan(verslag, 2003);
+  assert.equal(j.nachten, 0);
+  assert.equal(j.delen.length, 1);
+  assert.equal(j.delen[0].nachten, 0);
+});
+
+test('de delen tellen in elk jaar precies op tot het jaartotaal', () => {
+  const verslag = maakVerslag([
+    { id: 'a', startDate: '2024-05-01', endDate: '2024-05-04' },
+    { id: 'b', startDate: '2024-08-10', endDate: '2024-08-24' },
+    { id: 'c', startDate: '2024-08-24', endDate: '2024-08-28' },
+    { id: 'd', startDate: '2025-12-30', endDate: '2026-01-02' },
+    { id: 'e', periodLabel: 'zomer 1998' },
+  ]);
+  for (const j of verslag.jaren) {
+    assert.equal(
+      j.delen.reduce((n, d) => n + d.nachten, 0), j.nachten,
+      `jaar ${j.jaar} klopt niet`,
+    );
+  }
+  assert.equal(jaarVan(verslag, 2024).delen.length, 2, 'mei en augustus apart');
+});
+
+test('een hernoemde reis heet in de jaarbalk ook zo', () => {
+  const verslag = maakVerslag([
+    { id: 'a', startDate: '2019-07-05', endDate: '2019-07-12', tripTitle: 'Noorwegen 2019' },
+  ]);
+  assert.equal(jaarVan(verslag, 2019).delen[0].naam, 'Noorwegen 2019');
+});

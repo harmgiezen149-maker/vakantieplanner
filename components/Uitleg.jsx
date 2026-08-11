@@ -18,7 +18,7 @@ import {
   Route as RouteIcon, RefreshCw, Car, Footprints, Play, Flag, Star, Plus,
   Camera, Wallet, Share2, ShieldCheck, WifiOff, ArrowUpCircle, Compass,
   Crosshair, Backpack, CheckSquare, Calendar as CalendarIcon, Map as MapIcon,
-  Sparkles, Download, Trash2, Globe,
+  Sparkles, Download, Trash2, Globe, History, Filter, ListChecks,
 } from 'lucide-react';
 import { COLORS, CATEGORIES } from '@/lib/data';
 
@@ -225,6 +225,20 @@ export default function Uitleg() {
             <li><X size={12} /> <b>Kruisje</b> — haalt hem van deze dag af (de activiteit zelf blijft bestaan).</li>
             <li><Pencil size={12} /> <b>Potlood rechts</b> — klapt open: naam, notitie, ster, rol in de route, en verplaatsen naar een andere dag.</li>
           </ul>
+          <ul style={{ ...S.lijst, marginTop: 14 }}>
+            <li>
+              <MockKnop icon={<CalendarIcon size={11} />} stijl={S.knopGrijs}>Dagoverzicht</MockKnop>{' '}
+              op elke dagkaart springt naar het dagoverzicht van pr&eacute;cies die dag —
+              en daar brengt <b>In de planning</b> je weer terug naar dezelfde dag. De
+              datum staat in het webadres, dus de terugknop van je telefoon werkt ook.
+            </li>
+            <li>
+              <History size={12} /> <b>Afgelopen dagen staan ingeklapt.</b> Op dag tien
+              wil je niet eerst langs negen voorbije dagen scrollen. Bovenaan staat
+              “3 afgelopen dagen tonen” als je ze toch nodig hebt. Is de hele reis
+              voorbij, dan blijft alles gewoon staan.
+            </li>
+          </ul>
           <p style={S.let}>
             Let op: naam, notitie en ster horen bij de <em>activiteit</em>, niet bij de dag.
             Staat dezelfde activiteit op twee dagen, dan verandert hij op allebei.
@@ -294,6 +308,24 @@ export default function Uitleg() {
               — hetzelfde, maar rond de plek waar je nú staat. Onderweg dus.
             </li>
           </ul>
+          <p style={{ ...S.p, marginTop: 14 }}>
+            Met meerdere verblijven wordt die lijst al snel een stapel met alles door
+            elkaar. Daarom staat er bovenaan een balkje:
+          </p>
+          <Scherm bijschrift="Standaard alleen wat in de buurt ligt">
+            <div style={S.filterVoorbeeld}>
+              <Filter size={13} style={{ color: COLORS.lake, flexShrink: 0 }} />
+              <span style={{ flex: 1 }}>In de buurt van <strong>Camping Elzas</strong></span>
+              <span style={S.filterVoorbeeldLink}>Alles tonen (23)</span>
+            </div>
+          </Scherm>
+          <p style={S.p}>
+            De app kijkt welk verblijf vandaag aan de beurt is en toont alleen de
+            activiteiten die daar het dichtst bij liggen. Wil je vooruit plannen voor het
+            volgende verblijf, of achteraf nog iets bij het vorige zetten, dan haalt
+            <strong> Alles tonen</strong> de rest erbij. Activiteiten <em>zonder</em>{' '}
+            locatie blijven altijd staan — die horen nergens specifiek bij.
+          </p>
           <Bekijk href="/">Naar de activiteiten</Bekijk>
         </Punt>
 
@@ -319,6 +351,11 @@ export default function Uitleg() {
           <ul style={S.lijst}>
             <li><Footprints size={12} /> <b>Te voet of met de auto</b> — dezelfde regel als bij de slimme volgorde, met afstand en tijd per etappe.</li>
             <li><b>Volledig scherm</b> — het knopje rechtsboven op de kaart; Escape sluit weer.</li>
+            <li>
+              <MockKnop icon={<ListChecks size={11} />} stijl={S.knopGrijs}>In de planning</MockKnop>{' '}
+              springt terug naar het planscherm, naar dezelfde dag — die licht daar
+              even op zodat je meteen ziet waar je bent.
+            </li>
             <li><Check size={12} /> <b>Aanvinken onderweg</b> — wat je gedaan hebt vink je hier af.</li>
             <li><Download size={12} /> <b>GPX</b> — een wandelroute meenemen naar je horloge of losse navigatie.</li>
           </ul>
@@ -374,17 +411,38 @@ export default function Uitleg() {
             die van vroeger. Per verblijf een <strong>cijfer</strong>, een{' '}
             <strong>review</strong>, <strong>foto’s</strong> en de website.
           </p>
-          <Scherm bijschrift="Een verblijf in het logboek">
+          <p style={S.p}>
+            De verblijven staan <strong>gebundeld per vakantie</strong>: wie in één reis
+            drie campings deed, ziet die drie bij elkaar onder één kop.
+          </p>
+          <Scherm bijschrift="Een reis met zijn verblijven eronder">
+            <div style={S.reisKop}>
+              <span style={{ ...S.reisStreep, background: COLORS.lake }} />
+              <span style={{ flex: 1 }}>
+                <span style={S.reisNaam}>Noorwegen 2019 <Pencil size={11} style={{ opacity: 0.5 }} /></span>
+                <span style={S.verblijfMeta}>5 jul — 20 jul 2019 · 2 verblijven · gem. 7,5</span>
+              </span>
+            </div>
             <div style={S.verblijf}>
               <span style={S.cijfer}>8</span>
               <span style={{ flex: 1 }}>
-                <span style={S.verblijfNaam}>Camping Les Deux Lacs</span>
-                <span style={S.verblijfMeta}>🇫🇷 Frankrijk · Camping — tent · 26 jul — 2 aug 2026</span>
+                <span style={S.verblijfNaam}>Camping Oslo</span>
+                <span style={S.verblijfMeta}>🇳🇴 Noorwegen · Camping — tent · 5 jul — 12 jul 2019</span>
               </span>
               <span style={S.verblijfTeller}><Camera size={11} /> 4</span>
               <span style={{ ...S.verblijfTeller, color: COLORS.moss }}><Footprints size={11} /> 6</span>
             </div>
           </Scherm>
+          <p style={S.p}>
+            De naam van een reis wordt afgeleid uit de datums (“jul 2019”), maar met het{' '}
+            <Pencil size={11} style={{ verticalAlign: 'middle' }} />-tje geef je hem een
+            eigen naam. Leegmaken brengt de afgeleide naam terug.
+          </p>
+          <p style={S.let}>
+            Handig om te weten: geef je twee vakanties die vlak na elkaar vielen
+            verschillende namen, dan trekt de app ze ook echt uit elkaar. Zo splits je
+            twee reizen die per ongeluk aan elkaar geplakt waren.
+          </p>
           <ul style={S.lijst}>
             <li><b>Land en soort</b> — het land wordt automatisch uit de locatie afgeleid; het soort kies je zelf (tent, caravan, hotel, bnb…).</li>
             <li><b>Reizen</b> — verblijven die in de tijd aan elkaar grenzen worden als één reis getoond, met de route ertussen op de kaart.</li>
@@ -401,6 +459,31 @@ export default function Uitleg() {
             jaar, en welk verblijf het hoogste cijfer kreeg. Een verblijf zonder cijfer
             telt wel mee als verblijf, maar niet in het gemiddelde.
           </p>
+          <p style={S.p}>
+            De balk per jaar is <strong>opgedeeld per reis</strong>, in tinten groen: een
+            jaar met 27 nachten waren misschien twee losse vakanties, en dat hoor je te
+            kunnen zien. De namen staan eronder in dezelfde volgorde.
+          </p>
+          <Scherm bijschrift="2019: twee vakanties in één balk">
+            <div style={S.jaarRij}>
+              <span style={S.jaarLabel}>2019</span>
+              <span style={S.jaarSpoor}>
+                <span style={{ display: 'flex', height: '100%', width: '86%', borderRadius: 99, overflow: 'hidden' }}>
+                  <span style={{ flex: 15, background: COLORS.forest }} />
+                  <span style={{ flex: 4, background: '#6E9A72', borderLeft: `1px solid ${COLORS.creamSoft}` }} />
+                </span>
+              </span>
+              <span style={S.jaarGetal}>19&thinsp;n</span>
+            </div>
+            <div style={S.jaarLegenda}>
+              <span style={S.jaarLegendaItem}>
+                <span style={{ ...S.jaarStip, background: COLORS.forest }} /> Noorwegen 2019 15&thinsp;n
+              </span>
+              <span style={S.jaarLegendaItem}>
+                <span style={{ ...S.jaarStip, background: '#6E9A72' }} /> sep 2019 4&thinsp;n
+              </span>
+            </div>
+          </Scherm>
           <Bekijk href="/verslag">Open de terugblik</Bekijk>
         </Punt>
 
@@ -603,6 +686,33 @@ const S = {
     background: 'rgba(58,126,132,0.10)', color: COLORS.lake,
     border: `1px solid ${COLORS.lake}66`,
   },
+  knopGrijs: {
+    background: 'transparent', color: COLORS.inkLight,
+    border: `1px solid ${COLORS.hairline}`,
+  },
+  filterVoorbeeld: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    padding: '8px 11px', borderRadius: 10,
+    background: 'rgba(58,126,132,0.08)', fontSize: 12.5, color: COLORS.ink,
+  },
+  filterVoorbeeldLink: {
+    color: COLORS.lake, fontWeight: 700, textDecoration: 'underline', flexShrink: 0,
+  },
+  reisKop: { display: 'flex', alignItems: 'flex-start', gap: 9, marginBottom: 2 },
+  reisStreep: { width: 4, alignSelf: 'stretch', minHeight: 30, borderRadius: 99, flexShrink: 0 },
+  reisNaam: {
+    display: 'flex', alignItems: 'center', gap: 6,
+    fontFamily: "'Fraunces', serif", fontSize: 17, color: COLORS.forest, fontWeight: 500,
+  },
+  jaarRij: { display: 'flex', alignItems: 'center', gap: 9, fontSize: 12.5 },
+  jaarLabel: { minWidth: 34, color: COLORS.ink },
+  jaarSpoor: {
+    flex: 1, height: 9, borderRadius: 99, background: 'rgba(31,41,34,0.08)', overflow: 'hidden',
+  },
+  jaarGetal: { minWidth: 30, textAlign: 'right', color: COLORS.inkLight },
+  jaarLegenda: { display: 'flex', flexWrap: 'wrap', gap: '2px 12px', margin: '4px 0 0 43px', fontSize: 11 },
+  jaarLegendaItem: { display: 'inline-flex', alignItems: 'center', gap: 5, color: COLORS.ink },
+  jaarStip: { width: 8, height: 8, borderRadius: 3, display: 'inline-block' },
   melding: {
     marginTop: 4, padding: '7px 10px', borderRadius: 8,
     background: 'rgba(74,111,79,0.10)', color: COLORS.moss,

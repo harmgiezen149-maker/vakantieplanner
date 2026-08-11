@@ -6,7 +6,7 @@ import { upload } from '@vercel/blob/client';
 import {
   ArrowLeft, Plus, Trash2, Star, MapPin, Camera, Loader2, X, ChevronDown,
   SlidersHorizontal, RefreshCw, Maximize2, Minimize2, Calendar as CalendarIcon,
-  Globe, Check, Footprints,
+  Globe, Check, Footprints, Pencil,
 } from 'lucide-react';
 import {
   COLORS, formatDateRange, DEFAULT_ACTIVITIES, applyLocationOverride, CATEGORIES,
@@ -17,7 +17,7 @@ import LocationPicker from '@/components/LocationPicker';
 import ConflictMelding from '@/components/ConflictMelding';
 import {
   uid, fetchStayLog, saveStayLog, archiveTripStays,
-  reverseCountry, countryFromAddress, groepeerReizen, jarenVanVerblijf,
+  reverseCountry, countryFromAddress, groepeerReizen, jarenVanVerblijf, hernoemReis,
 } from '@/lib/stayLog';
 import {
   STAY_TYPES, stayTypeLabel, countryFlag,
@@ -832,6 +832,31 @@ export default function StayLog() {
     });
   }, [gefilterd]);
 
+  // De lijst gebundeld per reis. De groepering komt van de héle lijst
+  // (valkuil 14 — anders hakt een filter een reis in stukken); de filters
+  // bepalen alleen welke verblijven binnen een groep zichtbaar zijn, en een
+  // groep waar niets van overblijft valt weg.
+  const perReis = useMemo(() => {
+    const zichtbaar = new Set(gefilterd.map(s => s.id));
+    return alleReizen
+      .map(r => ({ ...r, zichtbareStays: r.stays.filter(s => zichtbaar.has(s.id)) }))
+      .filter(r => r.zichtbareStays.length > 0)
+      .sort((a, b) => {
+        // Nieuwste reis bovenaan; reizen zonder datum onderaan.
+        const da = a.stays[0]?.startDate || '';
+        const db = b.stays[0]?.startDate || '';
+        if (da && db) return db.localeCompare(da);
+        if (da) return -1;
+        if (db) return 1;
+        return (a.naam || '').localeCompare(b.naam || '');
+      });
+  }, [alleReizen, gefilterd]);
+
+  // Reis hernoemen: schrijft tripTitle op alle verblijven van die groep.
+  const hernoem = (reisId, titel) => {
+    mutate(list => hernoemReis(list, reisId, titel));
+  };
+
   const stats = useMemo(() => {
     const scored = gefilterd.filter(s => s.score != null);
     const avg = scored.length
@@ -987,38 +1012,110 @@ export default function StayLog() {
           )
         )}
 
-        <div style={S.list}>
-          {sorted.map((stay) => (
-            <StayCard
-              key={stay.id}
-              stay={stay}
-              selected={stay.id === selectedId}
-              expanded={stay.id === expandedId}
-              uploading={uploadingFor === stay.id}
-              reis={reisVanStay.get(stay.id)}
-              cardRef={(el) => { cardRefs.current[stay.id] = el; }}
-              onToggle={() => {
-                setExpandedId(id => id === stay.id ? null : stay.id);
-                setSelectedId(stay.id);
-              }}
-              onUpdate={(patch) => updateStay(stay.id, patch)}
-              onLocation={(loc) => setLocation(stay.id, loc)}
-              onBepaalLand={() => bepaalLand(stay)}
-              onRemove={() => removeStay(stay)}
-              onAddPhotos={(files) => addPhotos(stay.id, files)}
-              onBijwerkenBezoek={() => haalBezoekOp(stay)}
-              onVoegBezoekToe={(velden) => voegHandmatigBezoekToe(stay, velden)}
-              onVerwijderBezoek={(bezoekId) => updateStay(stay.id, {
-                bezocht: (stay.bezocht || []).filter(b => b.id !== bezoekId),
-              })}
-              onRemovePhoto={(photo) => removePhoto(stay.id, photo)}
+        {/* Gebundeld per reis: de verblijven van één vakantie horen bij elkaar
+            te staan, niet verspreid door een platte lijst. */}
+        {perReis.map((reis) => (
+          <div key={reis.id} style={S.reisGroep}>
+            <ReisKop
+              reis={reis}
+              onHernoem={(titel) => hernoem(reis.id, titel)}
             />
-          ))}
-        </div>
+            <div style={{ ...S.list, marginTop: 8 }}>
+              {reis.zichtbareStays.map((stay) => (
+                <StayCard
+                  key={stay.id}
+                  stay={stay}
+                  selected={stay.id === selectedId}
+                  expanded={stay.id === expandedId}
+                  uploading={uploadingFor === stay.id}
+                  reis={null}
+                  cardRef={(el) => { cardRefs.current[stay.id] = el; }}
+                  onToggle={() => {
+                    setExpandedId(id => id === stay.id ? null : stay.id);
+                    setSelectedId(stay.id);
+                  }}
+                  onUpdate={(patch) => updateStay(stay.id, patch)}
+                  onLocation={(loc) => setLocation(stay.id, loc)}
+                  onBepaalLand={() => bepaalLand(stay)}
+                  onRemove={() => removeStay(stay)}
+                  onAddPhotos={(files) => addPhotos(stay.id, files)}
+                  onBijwerkenBezoek={() => haalBezoekOp(stay)}
+                  onVoegBezoekToe={(velden) => voegHandmatigBezoekToe(stay, velden)}
+                  onVerwijderBezoek={(bezoekId) => updateStay(stay.id, {
+                    bezocht: (stay.bezocht || []).filter(b => b.id !== bezoekId),
+                  })}
+                  onRemovePhoto={(photo) => removePhoto(stay.id, photo)}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
+
+// ── De kop boven een reis ───────────────────────────────────────────
+//
+// De naam is afgeleid ("jul 2019") tot je hem zelf zet. Hernoemen schrijft
+// `tripTitle` op alle verblijven van de groep — zie hernoemReis() in
+// lib/stayLog.js. Leegmaken brengt de afgeleide naam terug.
+
+const ReisKop = ({ reis, onHernoem }) => {
+  const [bewerken, setBewerken] = useState(false);
+  const [naam, setNaam] = useState(reis.naam);
+  const eigenNaam = reis.stays.some(s => s.tripTitle);
+
+  const bewaar = () => {
+    setBewerken(false);
+    if (naam.trim() !== reis.naam) onHernoem(naam);
+  };
+
+  const cijfers = reis.zichtbareStays.filter(s => s.score != null).map(s => s.score);
+  const gemiddeld = cijfers.length
+    ? Math.round((cijfers.reduce((a, b) => a + b, 0) / cijfers.length) * 10) / 10
+    : null;
+  const aantal = reis.zichtbareStays.length;
+
+  return (
+    <div style={S.reisKop}>
+      <span style={{ ...S.reisKleur, background: reis.kleur }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {bewerken ? (
+          <input
+            autoFocus
+            style={S.reisInput}
+            value={naam}
+            onChange={(e) => setNaam(e.target.value.slice(0, 80))}
+            onBlur={bewaar}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.target.blur();
+              if (e.key === 'Escape') { setNaam(reis.naam); setBewerken(false); }
+            }}
+            placeholder="Bv. Noorwegen 2019"
+            aria-label="Naam van deze reis"
+          />
+        ) : (
+          <button
+            onClick={() => { setNaam(eigenNaam ? reis.naam : ''); setBewerken(true); }}
+            style={S.reisNaamKnop}
+            title="Naam van deze reis aanpassen"
+          >
+            {reis.naam}
+            <Pencil size={12} style={{ opacity: 0.5, flexShrink: 0 }} />
+          </button>
+        )}
+        <div style={S.reisMeta}>
+          {[
+            reis.periode,
+            `${aantal} ${aantal === 1 ? 'verblijf' : 'verblijven'}`,
+            gemiddeld != null ? `gem. ${String(gemiddeld).replace('.', ',')}` : null,
+          ].filter(Boolean).join(' · ')}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // ── Formulier voor een nieuw verblijf ───────────────────────────────
 
@@ -1968,6 +2065,24 @@ const S = {
     border: 'none', background: 'transparent', cursor: 'pointer',
     color: COLORS.inkLight, padding: 2, display: 'flex',
   },
+  reisGroep: { marginTop: 20 },
+  reisKop: { display: 'flex', alignItems: 'flex-start', gap: 10 },
+  reisKleur: {
+    width: 4, alignSelf: 'stretch', minHeight: 34, borderRadius: 99, flexShrink: 0,
+  },
+  reisNaamKnop: {
+    display: 'inline-flex', alignItems: 'center', gap: 7, maxWidth: '100%',
+    border: 'none', background: 'transparent', padding: 0, cursor: 'pointer',
+    fontFamily: "'Fraunces', serif", fontSize: 19, fontWeight: 500,
+    color: COLORS.forest, letterSpacing: '-0.01em', textAlign: 'left',
+  },
+  reisInput: {
+    width: '100%', boxSizing: 'border-box', padding: '4px 8px',
+    borderWidth: 1, borderStyle: 'solid', borderColor: COLORS.lake, borderRadius: 8,
+    background: COLORS.cream, color: COLORS.forest,
+    fontFamily: "'Fraunces', serif", fontSize: 19, fontWeight: 500,
+  },
+  reisMeta: { fontSize: 11.5, color: COLORS.inkLight, marginTop: 2 },
   bezoekToevoeg: {
     display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 8,
     padding: '7px 12px', borderRadius: 999,

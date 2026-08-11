@@ -7,12 +7,13 @@ import {
   ChevronRight, RefreshCw, User, Wifi, WifiOff, Check, AlertCircle, MapPin, Map as MapIcon,
   Pencil, Car, ChevronUp, ChevronDown, CheckSquare, Backpack,
   Settings, CalendarRange, Compass, Star, ShieldCheck, Wallet, Crosshair,
-  Route, Loader2, Flag, Play, Footprints, HelpCircle,
+  Route, Loader2, Flag, Play, Footprints, HelpCircle, History, Filter,
 } from 'lucide-react';
 import {
   COLORS, CATEGORIES, CATEGORY_ORDER, DEFAULT_ACTIVITIES,
   DEFAULT_TRIP_CONFIG, isTripConfigured, staysWithColors, buildDays, formatPeriod,
   getMapsLink, applyLocationOverride, formatDistance, formatDuration,
+  huidigVerblijf, verblijfPerActiviteit,
 } from '@/lib/data';
 import { useRoute } from '@/lib/useRoute';
 import {
@@ -44,6 +45,14 @@ import SuggestionsSheet from '@/components/planner/SuggestionsSheet';
 const getName = () => {
   if (typeof window === 'undefined') return '';
   return localStorage.getItem('planner-name') || '';
+};
+
+// Vandaag als 'YYYY-MM-DD', in de tijdzone van het apparaat. Bewust niet via
+// toISOString(): dat is UTC, en dan is het hier tussen middernacht en twee uur
+// 's nachts nog "gisteren" — precies wanneer je de planning voor morgen bekijkt.
+const vandaagKey = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 const setNameLS = (name) => {
   if (typeof window === 'undefined') return;
@@ -609,7 +618,7 @@ const slimLink = {
 
 // ============ DAY CARD ============
 
-const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, weer, anker, offline, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay, onSwapDay, onOptimaliseer, onZetVolgorde, onZetAnker }) => {
+const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, weer, anker, offline, gemarkeerd, kaartRef, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay, onSwapDay, onOptimaliseer, onZetVolgorde, onZetAnker }) => {
   const [swapping, setSwapping] = useState(false);
   // Uitkomst van de laatste optimalisatie: { tekst, vorige } | null
   const [slim, setSlim] = useState(null);
@@ -677,12 +686,14 @@ const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, 
   const hasStartCoords = Boolean(!lopen && day.startCoords);
 
   return (
-    <div style={{
+    <div ref={kaartRef} style={{
       background: hasActivities ? COLORS.creamSoft : 'rgba(250, 243, 225, 0.4)',
       borderRadius: 16, padding: 16,
-      border: `1px solid ${COLORS.hairline}`,
-      borderLeft: `4px solid ${stay?.color || COLORS.hairline}`,
-      transition: 'all 0.2s ease',
+      borderWidth: '1px 1px 1px 4px', borderStyle: 'solid',
+      borderColor: `${COLORS.hairline} ${COLORS.hairline} ${COLORS.hairline} ${stay?.color || COLORS.hairline}`,
+      // Kort oplichten na een sprong vanaf /dag, zodat je ziet waar je bent.
+      boxShadow: gemarkeerd ? `0 0 0 3px ${COLORS.lake}55` : 'none',
+      transition: 'box-shadow 0.3s ease',
     }}>
       <div style={{
         display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap',
@@ -724,14 +735,30 @@ const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, 
             background: 'rgba(58, 126, 132, 0.10)', borderRadius: 99,
           }}>{day.label}</div>
         )}
-        {/* De twee knoppen samen in één blok: past het niet naast de datum,
-            dan wippen ze samen naar de volgende regel in plaats van de
-            datum in tweeën te breken. */}
+        {/* De knoppen samen in één blok: past het niet naast de datum, dan
+            wippen ze samen naar de volgende regel in plaats van de datum in
+            tweeën te breken. */}
         {hasActivities && (
           <div style={{
             display: 'flex', gap: 6, marginLeft: 'auto', flexShrink: 0,
             alignItems: 'center',
           }}>
+            {/* Naar het dagoverzicht van precies deze dag. De datum staat in
+                het adres, dus de terugknop van de telefoon werkt ook. */}
+            <Link
+              href={`/dag?dag=${day.key}`}
+              title="Bekijk deze dag met kaart en route"
+              style={{
+                border: `1px solid ${COLORS.hairline}`,
+                background: 'transparent', color: COLORS.inkLight,
+                borderRadius: 99, padding: '4px 10px', textDecoration: 'none',
+                fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600,
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <CalendarIcon size={12} /> Dagoverzicht
+            </Link>
             {teOrdenen >= 2 && (
               <button
                 onClick={() => slimmeVolgorde()}
@@ -945,7 +972,7 @@ const DayCard = ({ day, days: allDays, activities, activityById, plan: planRef, 
 
 // ============ PLAN VIEW ============
 
-const PlanView = ({ days, plan, activityById, weerPerDag, routeAnkers, offline, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay, onSwapDay, onOptimaliseer, onZetVolgorde, onZetAnker, onOpenTripSettings }) => {
+const PlanView = ({ days, plan, activityById, weerPerDag, routeAnkers, offline, toonVerleden, onToonVerleden, gemarkeerdeDag, dagRefs, onAddClick, onRemove, onEditLocation, onMove, onUpdateProps, onMoveToDay, onSwapDay, onOptimaliseer, onZetVolgorde, onZetAnker, onOpenTripSettings }) => {
   if (days.length === 0) {
     return (
       <div style={{ padding: '40px 20px 100px', textAlign: 'center' }}>
@@ -970,9 +997,27 @@ const PlanView = ({ days, plan, activityById, weerPerDag, routeAnkers, offline, 
       </div>
     );
   }
+  // Dagen die al geweest zijn staan standaard ingeklapt: op dag tien van de
+  // vakantie wil je niet eerst langs negen afgelopen dagen scrollen. Alleen
+  // inklappen als er ook iets overblijft — is de hele reis voorbij, dan is een
+  // lege planning geen hulp.
+  const vandaag = vandaagKey();
+  const verleden = days.filter(d => d.key < vandaag);
+  const rest = days.length - verleden.length;
+  const klapIn = verleden.length > 0 && rest > 0 && !toonVerleden;
+  const zichtbareDagen = klapIn ? days.filter(d => d.key >= vandaag) : days;
+
   return (
     <div style={{ padding: '16px 20px 100px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {days.map(day => (
+      {verleden.length > 0 && rest > 0 && (
+        <button onClick={() => onToonVerleden(!toonVerleden)} style={S_verleden}>
+          <History size={13} />
+          {toonVerleden
+            ? `${verleden.length} afgelopen ${verleden.length === 1 ? 'dag' : 'dagen'} verbergen`
+            : `${verleden.length} afgelopen ${verleden.length === 1 ? 'dag' : 'dagen'} tonen`}
+        </button>
+      )}
+      {zichtbareDagen.map(day => (
         <DayCard
           key={day.key}
           day={day}
@@ -983,6 +1028,8 @@ const PlanView = ({ days, plan, activityById, weerPerDag, routeAnkers, offline, 
           weer={weerPerDag?.[day.key]}
           anker={routeAnkers?.[day.key] || null}
           offline={offline}
+          gemarkeerd={gemarkeerdeDag === day.key}
+          kaartRef={(el) => { if (dagRefs) dagRefs.current[day.key] = el; }}
           onOptimaliseer={onOptimaliseer}
           onZetVolgorde={onZetVolgorde}
           onZetAnker={onZetAnker}
@@ -997,6 +1044,29 @@ const PlanView = ({ days, plan, activityById, weerPerDag, routeAnkers, offline, 
       ))}
     </div>
   );
+};
+
+const S_filterBalk = {
+  display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12,
+  padding: '8px 12px', borderRadius: 10,
+  background: 'rgba(58,126,132,0.08)', color: COLORS.ink,
+  fontFamily: "'DM Sans', sans-serif", fontSize: 12.5, lineHeight: 1.4,
+};
+const S_filterKnop = {
+  flexShrink: 0, border: 'none', background: 'transparent', padding: 0,
+  cursor: 'pointer', color: COLORS.lake,
+  fontFamily: "'DM Sans', sans-serif", fontSize: 12.5, fontWeight: 700,
+  textDecoration: 'underline', whiteSpace: 'nowrap',
+};
+
+const S_verleden = {
+  alignSelf: 'flex-start',
+  display: 'inline-flex', alignItems: 'center', gap: 6,
+  padding: '6px 12px', borderRadius: 99,
+  borderWidth: 1, borderStyle: 'dashed', borderColor: COLORS.hairline,
+  background: 'transparent', color: COLORS.inkLight,
+  fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600,
+  cursor: 'pointer',
 };
 
 // ============ LIBRARY VIEW ============
@@ -1096,7 +1166,29 @@ const LibraryActivity = ({ activity, usedInDays, onAddClick, onDelete, onEditLoc
   );
 };
 
-const LibraryView = ({ activities, plan, onAddClick, onCreateCustom, onDeleteCustom, onEditLocation, onOpenSuggestions, onPasteLink, onInDeBuurt, onBezocht }) => {
+const LibraryView = ({ activities, plan, stays, onAddClick, onCreateCustom, onDeleteCustom, onEditLocation, onOpenSuggestions, onPasteLink, onInDeBuurt, onBezocht }) => {
+  // Op de camping heb je niets aan de tweehonderd ideeën rond het verblijf van
+  // volgende week. Standaard tonen we daarom alleen wat bij het verblijf van
+  // vandaag in de buurt ligt — met een knop om alsnog alles te zien, want
+  // vooruit plannen en achteraf iets toevoegen moet ook kunnen.
+  const [alles, setAlles] = useState(false);
+
+  const huidig = useMemo(() => huidigVerblijf(stays, vandaagKey()), [stays]);
+  const perStay = useMemo(
+    () => verblijfPerActiviteit(activities, stays),
+    [activities, stays],
+  );
+  // Alleen filteren als er iets te kiezen valt: met één verblijf hoort alles
+  // erbij en zou de schakelaar alleen maar in de weg staan.
+  const kanFilteren = (stays || []).filter(s => Array.isArray(s?.coords)).length > 1 && Boolean(huidig);
+  // Zonder locatie kun je een activiteit nergens aan koppelen — die blijven
+  // altijd staan. Dat zijn vaak juist de algemene ("boodschappen doen").
+  const zichtbaar = useMemo(() => {
+    if (!kanFilteren || alles) return activities;
+    return activities.filter(a => perStay[a.id] == null || perStay[a.id] === huidig.id);
+  }, [activities, perStay, huidig, kanFilteren, alles]);
+  const verborgen = activities.length - zichtbaar.length;
+
   const planUsage = useMemo(() => {
     const usage = {};
     Object.values(plan).flat().forEach(id => { usage[id] = (usage[id] || 0) + 1; });
@@ -1105,16 +1197,31 @@ const LibraryView = ({ activities, plan, onAddClick, onCreateCustom, onDeleteCus
 
   const grouped = useMemo(() => {
     const out = {};
-    activities.forEach(a => {
+    zichtbaar.forEach(a => {
       const cat = CATEGORIES[a.category] ? a.category : 'custom';
       if (!out[cat]) out[cat] = [];
       out[cat].push(a);
     });
     return out;
-  }, [activities]);
+  }, [zichtbaar]);
 
   return (
     <div style={{ padding: '16px 20px 100px' }}>
+      {kanFilteren && (
+        <div style={S_filterBalk}>
+          <Filter size={13} style={{ flexShrink: 0, color: COLORS.lake }} />
+          <span style={{ flex: 1, minWidth: 0 }}>
+            {alles
+              ? 'Alle activiteiten van de hele reis'
+              : <>In de buurt van <strong>{huidig.name}</strong></>}
+          </span>
+          <button onClick={() => setAlles(a => !a)} style={S_filterKnop}>
+            {alles
+              ? 'Alleen dit verblijf'
+              : `Alles tonen${verborgen > 0 ? ` (${verborgen})` : ''}`}
+          </button>
+        </div>
+      )}
       <button
         onClick={onOpenSuggestions}
         style={{
@@ -1321,6 +1428,11 @@ export default function Planner() {
   // bereikbaar was. Zolang dit staat is opslaan geblokkeerd.
   const [offlineOp, setOfflineOp] = useState(null);
   const [name, setName] = useState('');
+  // Afgelopen dagen staan standaard ingeklapt; dit zet ze weer aan.
+  const [toonVerleden, setToonVerleden] = useState(false);
+  // De dag waar je zojuist vanaf /dag naartoe sprong, kort opgelicht.
+  const [gemarkeerdeDag, setGemarkeerdeDag] = useState(null);
+  const dagRefs = useRef({});
 
   const saveTimer = useRef(null);
   const skipNextSave = useRef(true);
@@ -1804,6 +1916,29 @@ export default function Planner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
 
+  // Vanaf /dag teruggesprongen met ?dag=YYYY-MM-DD? Ga dan naar de planning,
+  // scroll naar die dag en laat hem even oplichten. Zit de dag in het verleden,
+  // dan klappen de afgelopen dagen vanzelf open — anders spring je naar iets
+  // wat niet in beeld staat.
+  useEffect(() => {
+    if (loading || days.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const dag = params.get('dag');
+    if (!dag || !days.some(d => d.key === dag)) return;
+    window.history.replaceState({}, '', window.location.pathname);
+    setActiveTab('plan');
+    if (dag < vandaagKey()) setToonVerleden(true);
+    setGemarkeerdeDag(dag);
+    // Na de render: naar de dag toe. Twee tellen oplichten is genoeg om hem
+    // terug te vinden zonder dat het gaat knipperen.
+    setTimeout(() => {
+      dagRefs.current[dag]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 60);
+    const t = setTimeout(() => setGemarkeerdeDag(null), 2400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, days.length]);
+
   if (loading) {
     return (
       <div style={{
@@ -1878,6 +2013,10 @@ export default function Planner() {
             weerPerDag={weerPerDag}
             routeAnkers={routeAnkers}
             offline={Boolean(offlineOp)}
+            toonVerleden={toonVerleden}
+            onToonVerleden={setToonVerleden}
+            gemarkeerdeDag={gemarkeerdeDag}
+            dagRefs={dagRefs}
             onOptimaliseer={optimaliseerDag}
             onZetVolgorde={zetVolgorde}
             onZetAnker={zetAnker}
@@ -1894,6 +2033,7 @@ export default function Planner() {
           <LibraryView
             activities={allActivities.map(a => applyLocationOverride(a, locationOverrides))}
             plan={plan}
+            stays={stays}
             onAddClick={(activityId) => setSheet({ type: 'pick-day', activityId })}
             onCreateCustom={() => setSheet({ type: 'create-custom' })}
             onDeleteCustom={deleteCustom}
