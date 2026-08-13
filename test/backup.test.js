@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   bepaalOpruiming, datumUitPad, backupPad, valideerMomentopname,
-  BACKUP_KEYS, BACKUP_FORMAAT,
+  BACKUP_KEYS, BACKUP_FORMAAT, kopieVerouderd, MAX_KOPIE_LEEFTIJD_DAGEN,
 } from '../lib/backup.js';
 
 // Valkuil 16: het opruimen verwijdert bestanden. Als dit misrekent ben je
@@ -109,4 +109,55 @@ test('afgeleide en vluchtige documenten blijven er bewust buiten', () => {
     assert.equal(BACKUP_KEYS.includes(key), false, `${key} hoort niet in de kopie`);
   }
   assert.equal(BACKUP_KEYS.some(k => k.startsWith('cache:')), false);
+});
+
+// ── Is de laatste kopie te oud? ─────────────────────────────────────
+//
+// Het vangnet onder álle oorzaken: draait de nachtelijke taak niet meer, dan
+// hoort /beheer dat te zeggen in plaats van er dagen over te zwijgen.
+
+const NU = new Date('2026-08-13T09:00:00Z');
+const pad = (datum) => `reservekopie/${datum}.json`;
+
+test('een kopie van vandaag is niet verouderd', () => {
+  const uit = kopieVerouderd([pad('2026-08-13')], NU);
+  assert.equal(uit.verouderd, false);
+  assert.equal(uit.laatste, '2026-08-13');
+  assert.equal(uit.dagen, 0);
+});
+
+test('een kopie van gisteren mag ook nog', () => {
+  assert.equal(kopieVerouderd([pad('2026-08-12')], NU).verouderd, false);
+});
+
+test('precies op de grens is nog niet verouderd', () => {
+  const grens = kopieVerouderd([pad('2026-08-11')], NU);
+  assert.equal(grens.dagen, MAX_KOPIE_LEEFTIJD_DAGEN);
+  assert.equal(grens.verouderd, false);
+});
+
+test('drie dagen zonder kopie is een probleem', () => {
+  const uit = kopieVerouderd([pad('2026-08-10')], NU);
+  assert.equal(uit.verouderd, true);
+  assert.equal(uit.dagen, 3);
+});
+
+test('de nieuwste kopie telt, niet de eerste in de lijst', () => {
+  const uit = kopieVerouderd(
+    [pad('2026-07-01'), pad('2026-08-13'), pad('2026-08-02')], NU,
+  );
+  assert.equal(uit.laatste, '2026-08-13');
+  assert.equal(uit.verouderd, false);
+});
+
+test('geen kopieën is ook verouderd', () => {
+  const uit = kopieVerouderd([], NU);
+  assert.equal(uit.verouderd, true);
+  assert.equal(uit.laatste, null);
+  assert.equal(uit.dagen, null);
+});
+
+test('rommelige paden vallen weg zonder om te vallen', () => {
+  assert.equal(kopieVerouderd(['reservekopie/rommel.json', null, 42], NU).laatste, null);
+  assert.equal(kopieVerouderd(null, NU).verouderd, true);
 });

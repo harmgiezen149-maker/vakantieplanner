@@ -131,6 +131,27 @@ Het verblijvenlogboek kan foto's per verblijf bewaren. Die gaan niet in Redis �
 
 > **Let op:** de foto's krijgen een publiek leesbare (maar onraadbare) URL. Wie de link heeft, kan de foto zien — ook zonder de familie-PIN. Voor vakantiekiekjes is dat meestal prima; zet er geen dingen in die echt privé moeten blijven.
 
+### 7b. De nachtelijke reservekopie
+
+Dezelfde Blob-store bewaart ook de reservekopieën. Zodra hij gekoppeld is, maakt de app
+**elke nacht om 03:00 UTC** vanzelf een kopie van de planning, de inpaklijst, de
+checklist, het verblijvenlogboek en het kasboek. Daar hoef je niets voor in te stellen:
+de taak staat in `vercel.json` en wordt bij het deployen aangemeld.
+
+Wil je hem strenger afsluiten, zet dan `CRON_SECRET` in **Settings** →
+**Environment Variables** op een lange willekeurige tekenreeks en deploy opnieuw. Vercel
+stuurt die sleutel dan mee, en alleen aanroepen mét die sleutel maken nog een kopie. Dat
+is een aanrader, geen voorwaarde — zonder de variabele draait de taak ook, alleen op
+Vercels eigen cron-kenmerk.
+
+Twee plekken om te kijken of hij loopt:
+
+- **In de app:** `/beheer` → *Reservekopieën*. Is de nieuwste kopie ouder dan twee dagen,
+  dan staat er een oranje waarschuwing boven de lijst. Blijft die staan, dan draait de
+  nachtelijke taak niet meer.
+- **In Vercel:** **Settings** → **Cron Jobs** toont wanneer de taak voor het laatst liep
+  en wat eruit kwam.
+
 ### 8. Redeploy
 
 1. Ga naar **Deployments** → klik op de laatste deploy → **Redeploy**

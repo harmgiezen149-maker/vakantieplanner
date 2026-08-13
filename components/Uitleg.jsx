@@ -531,7 +531,7 @@ export default function Uitleg() {
             PIN. Daar staat het gereedschap dat je zelden nodig hebt maar dan wel meteen:
           </p>
           <ul style={S.lijst}>
-            <li><ShieldCheck size={12} /> <b>Reservekopieën</b> — elke nacht automatisch, en je kunt er zelf een maken. Terugzetten kan ook; vlak daarvóór maakt de app nog een veiligheidskopie van de huidige stand.</li>
+            <li><ShieldCheck size={12} /> <b>Reservekopieën</b> — elke nacht automatisch, en je kunt er zelf een maken. Terugzetten kan ook; vlak daarvóór maakt de app nog een veiligheidskopie van de huidige stand. Blijft de nachtelijke kopie uit, dan staat er een oranje waarschuwing boven de lijst — een stille reservekopie is erger dan geen.</li>
             <li><Download size={12} /> <b>Alles downloaden</b> — één JSON-bestand met de hele planning.</li>
             <li><b>Foutenlogboek</b> — als er iets misgaat wordt dat hier stilletjes genoteerd. Handig als je wilt melden dat iets niet werkt.</li>
             <li><Trash2 size={12} /> <b>Opruimen</b> — planning wissen of een nieuwe vakantie starten. De verblijven kun je daarbij eerst in het logboek bewaren.</li>

@@ -501,6 +501,32 @@ die volgorde niet: het verschil tussen een reservekopie en een val is precies da
 De cron draait op `/api/backup/run` en niet op `/api/backup`, omdat een Vercel-cron altijd
 een GET doet en het maken van een kopie een POST is.
 
+**Een cron heeft geen PIN.** Hij komt uit een datacenter, niet uit een browser met
+`localStorage`, dus `X-Family-Pin` stuurt hij nooit mee. `/api/backup/run` controleerde
+daar tóch op zodra `CRON_SECRET` niet was ingesteld — met als gevolg elke nacht een 401 en
+dagenlang geen reservekopie. Controleer een cron-route dus **nooit** op de familie-PIN;
+de regel staat op één plek, `cronBron()` in `lib/toegang.js`, en geeft terug hóe het
+verzoek binnenkwam:
+
+| bron | wanneer |
+| --- | --- |
+| `'secret'` | `Authorization: Bearer $CRON_SECRET` — mét sleutel is dít het enige pad |
+| `'cron-header'` | Vercels eigen `x-vercel-cron`, alleen als er géén sleutel is ingesteld |
+| `'beheer'` | met de hand afgetrapt, langs `magBeheren()` |
+| `null` | geweigerd |
+
+Twee dingen die daaraan vastzitten. Bij `'cron-header'` laat de route `pad` en `url`
+**weg** uit het antwoord: die header is geen grendel (iedereen kan hem meesturen) en de
+`url` is een publieke Blob-link naar de hele planning. En een weigering gaat via
+`meldServerFout()` naar het foutenlogboek — precies omdat de oude 401 vóór alle logging
+zat en het probleem daardoor onzichtbaar was.
+
+Daar bovenop ligt een vangnet dat niets weet van de oorzaak: `kopieVerouderd()` in
+`lib/backup.js` kijkt alleen naar de nieuwste kopie, en `/beheer` zet er een oranje balk
+boven zodra die ouder is dan `MAX_KOPIE_LEEFTIJD_DAGEN` (2). Een verlopen Blob-token of
+Redis eruit geeft dezelfde melding. Eén gemiste nacht kan aan van alles liggen, twee op
+rij niet.
+
 **17. Afhankelijkheden bewust minimaal — en waarom er nog meldingen staan.**
 `xlsx` is eruit gehaald (prototype pollution + ReDoS, geen fix beschikbaar) en vervangen
 door `lib/csv.js`. Voeg hem niet terug: de import hoeft alleen kolommen te lezen.

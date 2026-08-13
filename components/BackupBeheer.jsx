@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft, Download, RefreshCw, Loader2, ShieldCheck, AlertTriangle, RotateCcw,
 } from 'lucide-react';
 import { COLORS } from '@/lib/data';
+import { kopieVerouderd } from '@/lib/backup';
 import { beheerHeaders } from '@/components/Poort';
 
 const kb = (n) => (n >= 1024 * 1024
@@ -52,6 +53,13 @@ export default function BackupBeheer({ ingebed = false }) {
   }, []);
 
   useEffect(() => { laad(); }, [laad]);
+
+  // Hoe oud is de nieuwste kopie? De regel zelf staat in lib/backup.js, zodat
+  // hij testbaar is; hier tekenen we alleen de melding.
+  const veroudering = useMemo(
+    () => kopieVerouderd(kopieen.map(k => k.pad)),
+    [kopieen],
+  );
 
   const maakNu = async () => {
     setBezig('maken');
@@ -151,6 +159,28 @@ export default function BackupBeheer({ ingebed = false }) {
         </p>
 
         <h2 style={S.kop2}>Beschikbare kopieën</h2>
+
+        {/* Het vangnet: draait de nachtelijke taak niet meer, dan hoort dat
+            hier te staan in plaats van dat je het pas merkt als je een kopie
+            nodig hebt. Wat de oorzaak ook is. */}
+        {!laden && !fout && veroudering.verouderd && (
+          <div style={S.verouderd}>
+            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div>
+              <strong>
+                {veroudering.laatste
+                  ? `De laatste reservekopie is van ${datumNL(veroudering.laatste)}.`
+                  : 'Er is nog geen enkele reservekopie.'}
+              </strong>
+              <div style={{ marginTop: 3 }}>
+                De nachtelijke taak lijkt niet te draaien. Kijk in Vercel bij
+                Settings → Cron Jobs wat de laatste run deed, en of{' '}
+                <code style={S.code}>CRON_SECRET</code> nog klopt. Maak
+                intussen hierboven met de hand een kopie.
+              </div>
+            </div>
+          </div>
+        )}
 
         {laden && <p style={S.stil}>Laden…</p>}
         {!laden && kopieen.length === 0 && !fout && (
@@ -277,6 +307,17 @@ const S = {
   sub: { fontSize: 14, lineHeight: 1.55, color: COLORS.ink, margin: '0 0 18px' },
   tip: { fontSize: 12, lineHeight: 1.5, color: COLORS.inkLight, margin: '10px 0 0' },
   stil: { color: COLORS.inkLight, fontSize: 14, fontStyle: 'italic' },
+  verouderd: {
+    display: 'flex', gap: 10, alignItems: 'flex-start',
+    padding: '11px 13px', borderRadius: 12, margin: '0 0 12px',
+    background: 'rgba(201,125,93,0.12)',
+    borderLeft: `3px solid ${COLORS.sunset}`,
+    color: COLORS.charcoal, fontSize: 13, lineHeight: 1.55,
+  },
+  code: {
+    fontFamily: 'ui-monospace, monospace', fontSize: 12,
+    background: 'rgba(31,41,34,0.07)', padding: '1px 5px', borderRadius: 5,
+  },
   knoppen: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 },
   primair: {
     display: 'inline-flex', alignItems: 'center', gap: 7,
