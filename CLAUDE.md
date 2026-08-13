@@ -439,8 +439,31 @@ Twee keuzes die daarin vastliggen en die je moet kennen voor je de cijfers aanpa
 nacht hoort bij de dag waaróp je slaapt (10 t/m 14 augustus = 4 nachten, zoals een
 camping rekent), en een verblijf **zonder cijfer telt wel mee als verblijf maar niet in
 het gemiddelde** — `null` is "nog niet beoordeeld", niet "een nul". Een reis over oud en
-nieuw verdeelt zijn nachten over beide jaren, maar telt als réis bij het jaar waarin hij
-eindigt; dat is dezelfde regel die de afgeleide naam ("aug 2026") gebruikt.
+nieuw verdeelt zijn nachten over beide jaren; als réis hoort hij bij het jaar waarin hij
+eindigt (dezelfde regel die de afgeleide naam "aug 2026" gebruikt), en dat is wat
+`totaal.aantalReizen` telt.
+
+Vier regels erbij, die er zijn gekomen door de statistiek naast de echte data te leggen:
+
+- **Tellen gebeurt in nachten, niet in verblijven.** `tel()` geeft allebei terug
+  (`{ naam, aantal, nachten }`) maar sorteert op nachten, en de pagina zet dat getal
+  voorop. Achttien korte verblijven in Noorwegen zijn minder nachten dan acht lange in
+  Denemarken, en dát is wat je wilt zien.
+- **Het gewogen gemiddelde weegt met `Math.max(nachten, 1)`.** Zonder die klem krijgt een
+  beoordeeld dagbezoek gewicht nul en verdwijnt het cijfer stilletjes. `gemiddeldCijfer`
+  (ongewogen) blijft ernaast bestaan; de pagina toont `gemiddeldCijferGewogen`.
+- **`jaren[].reizen` telt de reizen die een nácht in dat jaar hadden**, dus precies het
+  aantal stukjes in de balk. Eerder telde het het eindjaar, en dan sprak het getal de
+  balk tegen. Voor "bij welk jaar hoort deze reis" is `reis.jaar` er nog steeds.
+- **`vulJarenAan()` vult de overgeslagen jaren aan** zodat de as niet verspringt, en
+  `groepeerLegeJaren()` vouwt een reeks van drie of meer samen tot één regel. Wat daarbij
+  telt als leeg is **een jaar zonder reis, niet een jaar zonder nachten**: "zomer 2003"
+  levert nul nachten op maar je bent er wel geweest, en dat mag niet in een gat verdwijnen.
+
+De afstanden op `/verslag` zijn **hemelsbreed** (`afstandVanReis()` met `hemelsbreed()`
+uit `volgorde.js`), niet gereden — 38 verblijven zouden anders tientallen routeaanvragen
+kosten voor een pagina die je één keer per jaar opent. Het label zegt dat er ook bij;
+haal dat woord niet weg.
 
 **14b. Bezocht staat twee keer, en dat is met opzet.**
 Een activiteit krijgt `visited: true` in `planner:trip` (via `updateActivityProps`, dus
