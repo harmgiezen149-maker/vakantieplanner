@@ -34,7 +34,7 @@ eerst; is het al misgegaan, dan `rm -rf .next` en opnieuw starten.
 De tests draaien op `node --test` (in Node ingebouwd, geen extra afhankelijkheid) en staan
 in `test/`. Ze dekken de rekenkundige kern: `buildDays` en de override-regels in `data.js`,
 de reisgroepering in `stayLog.js`, de inpaklijst-invariant in `packing.js`, het opruimen van
-reservekopieën in `backup.js`, het uitlezen van Maps-links in `maps.js`, het samenvoegen van
+reservekopieën in `backup.js`, het uitlezen van Maps-links in `maps.js` en `mapsLink.js`, het samenvoegen van
 meldingen in `errorLog.js`, de versiecontrole in `conflict.js`, de cachesleutels in
 `geoCache.js`, de reisstatistiek in `reisverslag.js`, de deel-link in `delen.js`,
 het rekenwerk in `uitgaven.js`, de offline-kopie in `offline.js`,
@@ -114,6 +114,7 @@ app/
   uitgaven/page.jsx       → Uitgaven       (kasboek: per categorie en per persoon)
   beheer/page.jsx         → Beheer         (kopieën, fouten, opruimen — eigen wachtwoord)
   uitleg/page.jsx         → Uitleg         (handleiding in 17 punten; statisch)
+  toevoegen/page.jsx      → DeelOntvangen  (deeldoel van de telefoon: Maps → planner)
   reservekopie/, fouten/  → sturen door naar /beheer (oude bladwijzers)
   layout.jsx, manifest.js, icon.svg, globals.css   (PWA + huisstijl)
   api/
@@ -147,10 +148,11 @@ components/   Planner.jsx (planscherm), MapView.jsx, DayOverview.jsx,
               Poort.jsx (PinPoort + BeheerPoort), ConflictMelding.jsx,
               OfflineMelding.jsx, Foutmelder.jsx, VersieWacht.jsx,
               Reisverslag.jsx, Uitgaven.jsx,
-              Bekijken.jsx, DeelLink.jsx, Uitleg.jsx
+              Bekijken.jsx, DeelLink.jsx, Uitleg.jsx, DeelOntvangen.jsx
   planner/    de sheets van het planscherm — zie hieronder
 lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
-              (Maps-links + PIN), stayLog.js, stayTypes.js, backup.js, csv.js,
+              (Maps-links + PIN), mapsLink.js (link/HTML/adres uitlezen),
+              stayLog.js, stayTypes.js, backup.js, csv.js,
               bezoek.js, conflict.js, delen.js, errorLog.js, geoCache.js, packing.js,
               reisverslag.js, stayValidation.js, toegang.js, uitgaven.js,
               volgorde.js, routeDienst.js, weer.js, offline.js, redis.js,
@@ -413,6 +415,61 @@ wél een kale URL. Test dus nooit met `new URL(hele veld)` — gebruik `extractU
 ervoor. `LocationPicker` leest bij plakken bovendien de ruwe kleminhoud via `onPaste`,
 omdat een invoerveld van één regel de regeleindes wegpoetst en naam en adres anders aan
 elkaar plakken.
+
+**13b. Een korte deel-link geeft géén coördinaten, en dat gaat nooit veranderen.**
+Dit is de kern van `/api/resolve-maps` en het is niet vanzelfsprekend.
+`maps.app.goo.gl/…` stuurt keurig door (status 200, twee hops — Google werkt gewoon
+mee), maar de URL waar hij op uitkomt ziet er zo uit:
+
+```
+/maps/place/Kilefjorden+Camping,+Ivelandsvegen+2,+4737+Hornnes,+Noorwegen/data=!4m2!3m1!1s0x46…
+```
+
+Naam en volledig adres, maar geen `@lat,lng` en geen `!3d/!4d`. Die worden pas door de
+kaartpagina zélf aan de URL geplakt nadát die in een browser geladen is — dáárom werkt
+"in Chrome plakken en de adresbalk overnemen" wel. **Ga hier dus geen betere headers of
+een slimmere user-agent op loslaten**; dat is op 6 augustus 2026 geprobeerd (`59de95a`)
+en het probleem zit niet in de verbinding.
+
+Wat er wél werkt staat in `lib/mapsLink.js` en is pure, geteste logica. Drie bronnen op
+volgorde, en welke het werd staat als `bron` in het antwoord:
+
+| `bron` | waar het coördinaat vandaan komt | |
+| --- | --- | --- |
+| `'link'` | de URL zelf | exact |
+| `'pagina'` | de HTML van de kaart | exact |
+| `'adres'` | opgezocht bij het adres uit `/place/` | bij benadering |
+
+Vier dingen die daarin vastliggen:
+
+- **Het land gaat niet mee in de zoekopdracht.** De Maps-app levert hem in de taal van
+  de telefoon ("Noorwegen", niet "Norge") en een vrije Nominatim-zoekopdracht moet op
+  álle woorden matchen. Juist dat woord maakte de oude versie — die de hele string in
+  één keer opstuurde — structureel kansloos. `splitsPlaceAdres()` haalt het land eruit
+  en bewaart het apart; `zoekLadder()` gebruikt postcode + plaats.
+- **De ladder gaat van scherp naar ruim** (gestructureerd → naam + plaats → straat +
+  postcode → naam) en stopt bij de eerste treffer. In de praktijk vindt sport 1 een
+  klein Noors adres níét en sport 2 wel; die volgorde is dus geen sier.
+- **`bron: 'adres'` wordt tegen de gebruiker gezegd.** `LocationPicker`,
+  `PasteLinkSheet` en `/toevoegen` tonen dan "bij benadering" mét het opgezochte adres.
+  Een speld die stilletjes een straat verderop staat is erger dan een speld met een
+  bijschrift.
+- **Nominatim mag één verzoek per seconde** (valkuil 15), dus de sporten gaan
+  sequentieel met ~1,1 s ertussen. Daarom staat er `maxDuration = 30` op de route en
+  ligt er een `TOTAAL_BUDGET_MS`-deadline overheen: loopt hij tegen Vercels standaard
+  van 10 s aan, dan krijgt de client een 504 zónder JSON en kan hij niet eens zeggen
+  wat er misging.
+
+Mislukt alles, dan is de melding geen `window.alert` meer maar een regel ín het
+formulier met twee uitwegen ("Zoek op naam", "Openen in Maps") en de link blijft staan.
+
+**13c. De deelknop werkt niet overal, en dat ligt niet aan ons.**
+`app/manifest.js` heeft een `share_target` naar `/toevoegen`, zodat de planner in het
+deelmenu van de telefoon verschijnt. Methode **GET**: een POST-deeldoel vereist een
+service worker met fetch-handler, en die willen we niet (valkuil 19). Twee beperkingen
+van het platform: het werkt alleen als de app op het beginscherm is **geïnstalleerd**,
+en **Safari/iOS kent Web Share Target niet** — op een iPhone blijft plakken de weg.
+`/toevoegen` heet bewust niet `/deel`: "delen" is in deze app al de meekijk-link.
 
 **14. Reizen zijn afgeleid, niet opgeslagen.**
 `groepeerReizen()` in `lib/stayLog.js` plakt verblijven aan elkaar die in de tijd tegen

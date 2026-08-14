@@ -19,6 +19,22 @@ export default function manifest() {
       { src: '/icons/icon-192-maskable.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
       { src: '/icons/icon-512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
     ],
+    // Zet de planner in het deelmenu van de telefoon: in Google Maps
+    // Delen → Vakantieplanner, en de plek komt op /toevoegen binnen.
+    //
+    // Methode GET is een bewuste keuze: een POST-deeldoel (nodig voor
+    // bestanden) vereist een service worker met een fetch-handler, en die
+    // willen we hier niet — zie valkuil 19. Voor een link en wat tekst is GET
+    // genoeg.
+    //
+    // Twee dingen die niet aan de code liggen: dit werkt alleen als de app op
+    // het beginscherm is geïnstalleerd, en Safari/iOS ondersteunt Web Share
+    // Target helemaal niet. Op een iPhone blijft plakken de weg.
+    share_target: {
+      action: '/toevoegen',
+      method: 'GET',
+      params: { title: 'title', text: 'text', url: 'url' },
+    },
     shortcuts: [
       { name: 'Dagoverzicht', url: '/dag', description: 'Vandaag op vakantie' },
       { name: 'Kaart', url: '/kaart', description: 'Activiteiten op de kaart' },

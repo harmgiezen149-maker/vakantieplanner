@@ -1,12 +1,30 @@
 import { meldServerFout } from '@/app/api/fouten/route';
+import { cacheSleutel, uitCache, naarCache, TTL } from '@/lib/geoCache';
+import { parseMapsUrl, coordsUitHtml, splitsPlaceAdres, zoekLadder, adresLabel } from '@/lib/mapsLink';
 
 // Lost Google Maps-links op naar naam + coördinaten.
 // Korte links (maps.app.goo.gl) vereisen het volgen van de redirect —
 // dat kan niet vanuit de browser (CORS), dus dat doen we hier server-side.
 //
-// POST { url } → { name, coords: [lat, lng], finalUrl }
+// POST { url, naamHint? } → { name, coords: [lat, lng], description, finalUrl, bron }
+//
+// `bron` zegt hoe zeker het coördinaat is, en dat is geen sier:
+//
+//   'link'    uit de URL zelf         — exact, dit is de speld
+//   'pagina'  uit de HTML van de kaart — exact
+//   'adres'   opgezocht bij het adres  — bij benadering, de UI zegt dat erbij
+//
+// Waaróm die derde nodig is: de URL waar een korte deel-link op uitkomt bevat
+// wél de naam en het volledige adres maar géén coördinaten. Het `@lat,lng` dat
+// je uit de adresbalk van een browser kopieert wordt pas door de kaartpagina
+// zélf toegevoegd. Zie lib/mapsLink.js.
 
 export const dynamic = 'force-dynamic';
+// Elke andere trage route zet dit ook (hiking, suggest, weer, whats-here, de
+// back-uproutes). Zonder deze regel kapt Vercel af op 10 s, en deze route doet
+// redirects volgen plus tot vier Nominatim-zoekopdrachten die van elkaar een
+// seconde afstand moeten houden.
+export const maxDuration = 30;
 
 const ALLOWED_HOSTS = new Set([
   'maps.app.goo.gl',
@@ -18,6 +36,12 @@ const ALLOWED_HOSTS = new Set([
   'www.google.nl',
   'google.nl',
 ]);
+
+// Het hele verzoek moet ruim binnen maxDuration blijven. Is het budget op, dan
+// geven we terug wat we hebben in plaats van tegen de tijdslimiet aan te lopen
+// en de client een 504 zonder JSON te sturen — dan zou hij niet eens kunnen
+// zeggen wat er misging.
+const TOTAAL_BUDGET_MS = 24_000;
 
 let calls = [];
 function rateLimited() {
@@ -38,53 +62,12 @@ const BROWSER_HEADERS = {
   'Cookie': 'CONSENT=YES+; SOCS=CAISAiAD',
 };
 
-// Haal naam + coördinaten uit een (volledige) Google Maps-URL
-function parseMapsUrl(urlStr) {
-  let name = null;
-  let coords = null;
+const NOMINATIM_HEADERS = {
+  'User-Agent': 'VakantiePlanner/1.0 (familie-vakantieplanner)',
+  'Accept-Language': 'nl,en,fr,de',
+};
 
-  // Ook de percent-gedecodeerde variant meenemen: in een consent- of
-  // redirect-URL zit de echte kaart-URL vaak gecodeerd in ?continue=…
-  let ontcijferd = urlStr;
-  try { ontcijferd = decodeURIComponent(urlStr); } catch { /* laat staan */ }
-  const kandidaten = ontcijferd === urlStr ? [urlStr] : [urlStr, ontcijferd];
-
-  for (const kand of kandidaten) {
-    if (!name) {
-      const placeMatch = /\/place\/([^/@?]+)/.exec(kand);
-      if (placeMatch) {
-        try {
-          const n = decodeURIComponent(placeMatch[1]).replace(/\+/g, ' ').trim();
-          // "Camping+X" is een naam; een kale coördinaat niet
-          if (n && !/^-?\d+\.\d+,\s*-?\d+\.\d+$/.test(n)) name = n;
-        } catch { /* laat null */ }
-      }
-    }
-
-    if (!coords) {
-      // Volgorde is de voorkeursvolgorde: het exacte plek-anker (!3d..!4d..)
-      // is nauwkeuriger dan het kaartcentrum (@..), en dat weer nauwkeuriger
-      // dan een losse zoekparameter.
-      const patronen = [
-        /!3d(-?\d{1,2}(?:\.\d+)?)!4d(-?\d{1,3}(?:\.\d+)?)/,
-        /@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/,
-        /[?&](?:q|query|ll|sll|center|daddr|destination)=(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)/,
-      ];
-      for (const re of patronen) {
-        const m = re.exec(kand);
-        if (!m) continue;
-        const lat = Number(m[1]);
-        const lng = Number(m[2]);
-        if (isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
-          coords = [lat, lng];
-          break;
-        }
-      }
-    }
-  }
-
-  return { name, coords };
-}
+const wacht = (ms) => new Promise(r => setTimeout(r, ms));
 
 // Redirects met de hand volgen in plaats van ze door fetch te laten afhandelen.
 // Dat is het hele punt: de volledige kaart-URL staat al in de Location-header
@@ -92,18 +75,19 @@ function parseMapsUrl(urlStr) {
 // juist dáár zit de toestemmingspagina die het uitlezen liet stuklopen.
 // Geeft alle bezochte URL's terug plus de laatste respons (voor het geval we
 // alsnog in de HTML moeten kijken).
-async function volgRedirects(startUrl, maxHops = 6) {
+async function volgRedirects(startUrl, deadline, maxHops = 6) {
   const bezocht = [startUrl];
   let huidig = startUrl;
   let laatste = null;
 
   for (let i = 0; i < maxHops; i++) {
+    if (Date.now() > deadline) break;
     let res;
     try {
       res = await fetch(huidig, {
         redirect: 'manual',
         headers: BROWSER_HEADERS,
-        signal: AbortSignal.timeout(9_000),
+        signal: AbortSignal.timeout(Math.min(9_000, Math.max(1_000, deadline - Date.now()))),
       });
     } catch {
       break;
@@ -127,6 +111,54 @@ async function volgRedirects(startUrl, maxHops = 6) {
   }
 
   return { bezocht, laatste };
+}
+
+// De zoekladder aflopen tot er iets gevonden is. Nominatim staat één verzoek
+// per seconde toe (valkuil 15), dus dit gaat sequentieel met ruim een seconde
+// ertussen — nooit Promise.all.
+async function zoekAdres(sporten, deadline) {
+  const geprobeerd = [];
+  for (const [i, sport] of sporten.entries()) {
+    if (Date.now() > deadline) break;
+    if (i > 0) await wacht(1_100);
+    if (Date.now() > deadline) break;
+
+    const params = new URLSearchParams({ format: 'json', limit: '1', addressdetails: '1' });
+    if (sport.soort === 'gestructureerd') {
+      for (const [k, v] of Object.entries(sport.params)) params.set(k, v);
+    } else {
+      params.set('q', sport.q);
+    }
+    geprobeerd.push(sport.soort === 'gestructureerd' ? 'gestructureerd' : sport.q);
+
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+        headers: NOMINATIM_HEADERS,
+        signal: AbortSignal.timeout(Math.min(8_000, Math.max(1_000, deadline - Date.now()))),
+      });
+      if (!res.ok) continue;
+      const treffers = await res.json();
+      const t = treffers?.[0];
+      if (!t) continue;
+      const lat = parseFloat(t.lat);
+      const lng = parseFloat(t.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      return { coords: [lat, lng], treffer: t, geprobeerd };
+    } catch {
+      // deze sport mag mislukken; de volgende krijgt zijn kans
+    }
+  }
+  return { coords: null, treffer: null, geprobeerd };
+}
+
+// De sleutel staat op de opgeschoonde URL: de deelknop plakt er per keer andere
+// meetparameters achter (g_st, entry, g_ep, skid), en zonder opschonen krijgt
+// dezelfde plek dus elke keer een nieuwe sleutel.
+function cacheDoel(url) {
+  const schoon = new URL(url.toString());
+  schoon.search = '';
+  schoon.hash = '';
+  return cacheSleutel('resolveMaps', [schoon.toString()]);
 }
 
 export async function POST(request) {
@@ -158,65 +190,70 @@ export async function POST(request) {
     return Response.json({ error: 'unsupported_host' }, { status: 400 });
   }
 
-  // Volg de redirect-keten naar de volledige Maps-URL
-  const { bezocht, laatste } = await volgRedirects(url.toString());
+  // De naam die de gebruiker meeplakte. De deelknop van de Maps-app zet naam en
+  // adres vóór de link, en die tekst is soms het enige aanknopingspunt.
+  const naamHint = String(body.naamHint || '').trim().slice(0, 120) || null;
 
-  // Van achter naar voren kijken: de laatste hop is het meest specifiek
+  const deadline = Date.now() + TOTAAL_BUDGET_MS;
+  const sleutel = cacheDoel(url);
+  const bewaard = await uitCache(sleutel);
+  if (bewaard) return Response.json({ ...bewaard, uitCache: true });
+
+  // Volg de redirect-keten naar de volledige Maps-URL
+  const { bezocht, laatste } = await volgRedirects(url.toString(), deadline);
+
+  // ── Bron 1: de URL's in de keten. Van achter naar voren, want de laatste
+  //    hop is het meest specifiek.
   let finalUrl = bezocht[bezocht.length - 1];
   let name = null;
   let coords = null;
+  let bron = null;
   for (let i = bezocht.length - 1; i >= 0; i--) {
     const uit = parseMapsUrl(bezocht[i]);
     if (!name && uit.name) name = uit.name;
-    if (uit.coords) { coords = uit.coords; finalUrl = bezocht[i]; break; }
+    if (uit.coords) { coords = uit.coords; bron = 'link'; finalUrl = bezocht[i]; break; }
   }
 
-  // Nog niets? Dan alsnog in de HTML kijken — daar staat vaak een volledige
-  // kaart-URL, soms percent-gecodeerd in een continue=-parameter.
+  // ── Bron 2: de HTML van de kaartpagina. Die hebben we vaak toch al
+  //    opgehaald, dus kijken we erin voordat we gaan gokken op het adres.
   if (!coords && laatste) {
     try {
       const text = await laatste.text();
-      const kandidaten = [
-        /https:\/\/www\.google\.[a-z.]+\/maps\/[^"'\\\s<>]+/,
-        /https%3A%2F%2Fwww\.google\.[a-z.]+%2Fmaps%2F[^"'\\\s<>&]+/,
-      ];
-      for (const re of kandidaten) {
-        const m = re.exec(text);
-        if (!m) continue;
-        let kandidaat = m[0].replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
-        try { kandidaat = decodeURIComponent(kandidaat); } catch { /* laat staan */ }
-        const uit = parseMapsUrl(kandidaat);
-        if (!name && uit.name) name = uit.name;
-        if (uit.coords) { coords = uit.coords; finalUrl = kandidaat; break; }
+      const uitPagina = coordsUitHtml(text);
+      if (uitPagina) { coords = uitPagina.coords; bron = 'pagina'; }
+      if (!coords) {
+        // Soms staat er een volledige kaart-URL in de HTML, soms
+        // percent-gecodeerd onder continue=.
+        const kandidaten = [
+          /https:\/\/www\.google\.[a-z.]+\/maps\/[^"'\\\s<>]+/,
+          /https%3A%2F%2Fwww\.google\.[a-z.]+%2Fmaps%2F[^"'\\\s<>&]+/,
+        ];
+        for (const re of kandidaten) {
+          const m = re.exec(text);
+          if (!m) continue;
+          let kandidaat = m[0].replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
+          try { kandidaat = decodeURIComponent(kandidaat); } catch { /* laat staan */ }
+          const uit = parseMapsUrl(kandidaat);
+          if (!name && uit.name) name = uit.name;
+          if (uit.coords) { coords = uit.coords; bron = 'pagina'; finalUrl = kandidaat; break; }
+        }
       }
     } catch {
       // body lezen mag mislukken
     }
   }
 
-  // Vangnet: sommige deel-links uit de Maps-app komen uit op een URL met wél
-  // een plaatsnaam maar zonder coördinaten. Zoek die naam dan op — beter een
-  // locatie bij benadering dan een foutmelding.
-  if (!coords && name) {
-    try {
-      const zoek = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name)}&format=json&limit=1`,
-        {
-          headers: {
-            'User-Agent': 'VakantiePlanner/1.0 (familie-vakantieplanner)',
-            'Accept-Language': 'nl,en,fr,de',
-          },
-          signal: AbortSignal.timeout(8_000),
-        },
-      );
-      if (zoek.ok) {
-        const treffers = await zoek.json();
-        const t = treffers?.[0];
-        if (t) coords = [parseFloat(t.lat), parseFloat(t.lon)];
-      }
-    } catch {
-      // vangnet mag falen
-    }
+  // ── Bron 3: het adres opzoeken. Dit is het pad dat de korte deel-link van de
+  //    Maps-app redt: die komt uit op een /place/-URL mét het volledige adres
+  //    maar zónder coördinaten. Zie lib/mapsLink.js voor waarom het adres in
+  //    stukken de zoekopdracht wél laat slagen en als één blok niet.
+  const onderdelen = splitsPlaceAdres(name || naamHint);
+  let adres = adresLabel(onderdelen);
+  let geprobeerd = [];
+  if (!coords) {
+    const uit = await zoekAdres(zoekLadder(onderdelen), deadline);
+    geprobeerd = uit.geprobeerd;
+    if (uit.coords) { coords = uit.coords; bron = 'adres'; }
   }
 
   if (!coords) {
@@ -225,7 +262,8 @@ export async function POST(request) {
     // strandde, zonder dat iemand het hoeft te melden.
     await meldServerFout(
       'Maps-link niet uit te lezen',
-      `hops=${bezocht.length} status=${laatste?.status ?? '-'} eind=${finalUrl}`,
+      `hops=${bezocht.length} status=${laatste?.status ?? '-'} ` +
+      `naam=${name || naamHint || '-'} sporten=${geprobeerd.length} eind=${finalUrl}`,
       '/api/resolve-maps',
     );
     // finalUrl meesturen: dan kan de gebruiker hem alsnog met de hand plakken,
@@ -233,31 +271,58 @@ export async function POST(request) {
     return Response.json({
       error: 'no_coords_found',
       finalUrl,
+      naam: name || naamHint || null,
       hops: bezocht.length,
+      sporten: geprobeerd.length,
       status: laatste?.status ?? null,
     }, { status: 422 });
   }
 
-  // Verrijk met een omschrijving (type + plaats) via reverse-geocoding
-  let description = null;
-  let resolvedName = name;
-  try {
-    const rev = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${coords[0]}&lon=${coords[1]}&zoom=18&addressdetails=1`,
-      { headers: { 'User-Agent': 'VakantiePlanner/1.0 (familie-vakantieplanner)' }, signal: AbortSignal.timeout(8_000) },
-    );
-    if (rev.ok) {
-      const d = await rev.json();
-      const a = d.address || {};
-      const place = a.village || a.town || a.city || a.hamlet || a.municipality || null;
-      const typ = d.type ? String(d.type).replace(/_/g, ' ') : null;
-      description = [typ, place].filter(Boolean).join(' · ') || null;
-      // Als de URL geen naam gaf, gebruik de Nominatim-naam
-      if (!resolvedName && d.name) resolvedName = String(d.name).slice(0, 80);
+  // Verrijk met een omschrijving (type + plaats) via reverse-geocoding.
+  // Kwam het coördinaat uit het adres, dan weten we de omschrijving al en
+  // hoeven we Nominatim niet nóg een keer lastig te vallen.
+  let description = adres;
+  let resolvedName = name || naamHint;
+  if (bron !== 'adres' && Date.now() < deadline) {
+    try {
+      const rev = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${coords[0]}&lon=${coords[1]}&zoom=18&addressdetails=1`,
+        {
+          headers: NOMINATIM_HEADERS,
+          signal: AbortSignal.timeout(Math.min(8_000, Math.max(1_000, deadline - Date.now()))),
+        },
+      );
+      if (rev.ok) {
+        const d = await rev.json();
+        const a = d.address || {};
+        const place = a.village || a.town || a.city || a.hamlet || a.municipality || null;
+        const typ = d.type ? String(d.type).replace(/_/g, ' ') : null;
+        description = [typ, place].filter(Boolean).join(' · ') || description;
+        // Als de URL geen naam gaf, gebruik de Nominatim-naam
+        if (!resolvedName && d.name) resolvedName = String(d.name).slice(0, 80);
+      }
+    } catch {
+      // omschrijving is optioneel
     }
-  } catch {
-    // omschrijving is optioneel
   }
 
-  return Response.json({ name: resolvedName, coords, description, finalUrl });
+  // De naam die we teruggeven is de plek, niet het hele adres: "Kilefjorden
+  // Camping" en niet "Kilefjorden Camping, Ivelandsvegen 2, 4737 Hornnes,
+  // Noorwegen". Dat adres staat in `adres` en `description`.
+  const antwoord = {
+    name: onderdelen.naam || resolvedName,
+    coords,
+    description,
+    adres,
+    land: onderdelen.land,
+    finalUrl,
+    bron,
+  };
+
+  // Alleen geslaagde antwoorden bewaren, en falen mag het verzoek nooit slopen
+  // (valkuil 7). Melden via console.warn, niet via het foutenlogboek — dat
+  // staat zelf in Redis.
+  await naarCache(sleutel, antwoord, TTL.geocode);
+
+  return Response.json(antwoord);
 }
