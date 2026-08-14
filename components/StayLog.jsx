@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { upload } from '@vercel/blob/client';
 import {
   ArrowLeft, Plus, Trash2, Star, MapPin, Camera, Loader2, X, ChevronDown,
@@ -13,6 +14,7 @@ import {
 } from '@/lib/data';
 import { bezoekPerVerblijf, voegBezoekToe, handmatigBezoek } from '@/lib/bezoek';
 import { getPin } from '@/lib/maps';
+import { plekUitParams } from '@/lib/deelPlek';
 import LocationPicker from '@/components/LocationPicker';
 import ConflictMelding from '@/components/ConflictMelding';
 import {
@@ -412,6 +414,8 @@ export default function StayLog() {
   const [selectedId, setSelectedId] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
   const [adding, setAdding] = useState(false);
+  // Voorgevulde plek uit de deelknop (/toevoegen → "Als verblijf").
+  const [gedeeldePlek, setGedeeldePlek] = useState(null);
   const [importing, setImporting] = useState(false);
   const [uploadingFor, setUploadingFor] = useState(null);
   // Voortgang van het achteraf bepalen van landen: { done, total } | null
@@ -434,8 +438,33 @@ export default function StayLog() {
   // overschrijven met oudere serverdata (zelfde vangnet als de inpaklijst).
   const dirty = useRef(false);
   const cardRefs = useRef({});
+  const formRef = useRef(null);
 
   useEffect(() => { setName(getName()); }, []);
+
+  // Kom je binnen vanaf de deelknop (/toevoegen → "Als verblijf"), dan staat de
+  // plek in de URL. Formulier openen, voorvullen, en de URL daarna wissen:
+  // zonder dat wissen opent een verversing — of de focus-refresh, die deze
+  // pagina bij elke terugkeer doet — het formulier telkens opnieuw voorgevuld,
+  // en typ je je verblijf twee keer in.
+  const params = useSearchParams();
+  const router = useRouter();
+  const deelGedaan = useRef(false);
+  useEffect(() => {
+    if (deelGedaan.current) return;
+    const plek = plekUitParams(params);
+    if (!plek) return;
+    deelGedaan.current = true;
+    setGedeeldePlek(plek);
+    setAdding(true);
+    router.replace('/verblijven', { scroll: false });
+  }, [params, router]);
+
+  // Pas scrollen als het formulier er echt staat.
+  useEffect(() => {
+    if (!adding || !gedeeldePlek || !formRef.current) return;
+    formRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [adding, gedeeldePlek]);
 
   const load = useCallback(async () => {
     if (dirty.current) return;
@@ -633,6 +662,7 @@ export default function StayLog() {
     };
     mutate(list => [...list, stay]);
     setAdding(false);
+    setGedeeldePlek(null);
     setExpandedId(stay.id);
     setSelectedId(stay.id);
     // Geen land uit het zoekresultaat? Dan alsnog achteraf bepalen.
@@ -979,7 +1009,10 @@ export default function StayLog() {
         )}
 
         <div style={S.actions}>
-          <button style={S.primaryBtn} onClick={() => setAdding(a => !a)}>
+          <button
+            style={S.primaryBtn}
+            onClick={() => { setGedeeldePlek(null); setAdding(a => !a); }}
+          >
             <Plus size={16} /> Verblijf toevoegen
           </button>
           <button style={S.secondaryBtn} onClick={importCurrentTrip} disabled={importing}>
@@ -989,10 +1022,17 @@ export default function StayLog() {
         </div>
 
         {adding && (
-          <StayForm
-            onSave={addStay}
-            onCancel={() => setAdding(false)}
-          />
+          <div ref={formRef}>
+            <StayForm
+              // key: kom je twee keer achter elkaar met een gedeelde plek
+              // binnen, dan moet het formulier opnieuw beginnen in plaats van
+              // zijn oude begin-state te houden.
+              key={gedeeldePlek ? `deel-${gedeeldePlek.coords.join(',')}` : 'leeg'}
+              initieel={gedeeldePlek}
+              onSave={addStay}
+              onCancel={() => { setAdding(false); setGedeeldePlek(null); }}
+            />
+          </div>
         )}
 
         {sorted.length === 0 && !adding && (
@@ -1119,9 +1159,24 @@ const ReisKop = ({ reis, onHernoem }) => {
 
 // ── Formulier voor een nieuw verblijf ───────────────────────────────
 
-const StayForm = ({ onSave, onCancel }) => {
-  const [name, setName] = useState('');
-  const [location, setLocation] = useState(null);
+// `initieel` vult naam, locatie en website vooruit in. Dat is wat er
+// binnenkomt als je een plek vanuit de Google Maps-app deelt en "als verblijf"
+// kiest — zie lib/deelPlek.js. Een effect is niet nodig: dit formulier wordt
+// pas gemonteerd als `adding` waar is, dus de begin-state is de juiste.
+//
+// Datums, soort en cijfer laten we bewust leeg. De datums weten we niet, en
+// het soort verblijf kunnen we niet raden: OpenStreetMap zegt hooguit
+// "caravan_site", terwijl STAY_TYPES tent, caravan, camper en stacaravan
+// onderscheidt. Een voorselectie die er soms naast zit is erger dan een lege,
+// want die tik je niet weg.
+const StayForm = ({ onSave, onCancel, initieel }) => {
+  const [name, setName] = useState(initieel?.naam || '');
+  const [location, setLocation] = useState(
+    initieel?.coords
+      ? { label: initieel.naam || initieel.label, coords: initieel.coords, fullName: initieel.label }
+      : null,
+  );
+  const [website, setWebsite] = useState(initieel?.website || '');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [periodLabel, setPeriodLabel] = useState('');
@@ -1153,6 +1208,7 @@ const StayForm = ({ onSave, onCancel }) => {
       periodLabel: periodLabel.trim().slice(0, 60) || null,
       score: score === '' ? null : Number(score),
       review: review.trim().slice(0, 2000) || null,
+      website: website.trim().slice(0, 300) || null,
     });
   };
 
@@ -1175,6 +1231,19 @@ const StayForm = ({ onSave, onCancel }) => {
         placeholder="Zoek een plek of plak een Maps-link"
       />
       <div style={S.hint}>Het land wordt hier automatisch uit afgeleid.</div>
+
+      {/* Dit veld ontbrak, terwijl het datamodel het heeft en je het ná het
+          opslaan wél kunt bewerken. Nu de deelknop er een Maps-link in kan
+          zetten, moet je die kunnen zien en aanpassen — stille invoer die je
+          later niet meer thuis kunt brengen is erger dan een veld extra. */}
+      <label style={S.label}>Website of Maps-link</label>
+      <input
+        style={S.input}
+        value={website}
+        onChange={(e) => setWebsite(e.target.value)}
+        placeholder="Optioneel — komt als link op de kaart van dit verblijf"
+        inputMode="url"
+      />
 
       <label style={S.label}>Soort verblijf</label>
       <TypeSelect

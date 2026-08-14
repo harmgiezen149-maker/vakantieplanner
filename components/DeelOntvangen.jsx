@@ -7,19 +7,31 @@
 // POST-doel vereist een service worker en die willen we bewust niet — valkuil
 // 19). De telefoon zet dan ?title=&text=&url= achter deze pagina.
 //
-// Wat hij niet doet: vragen op wélke dag het moet. De plek komt in de
-// bibliotheek ("mijn ideeën") en die sleep je daarna in de planner op een dag.
-// Een dagkeuze hier zou de snelste weg — delen en klaar — weer traag maken.
+// Er zijn twee bestemmingen, want een camping is iets anders dan een uitje:
+//
+//   "aan mijn ideeën"  → customActivities, hier ter plekke opgeslagen
+//   "als verblijf"     → door naar /verblijven met het formulier voorgevuld
+//
+// Dat tweede sturen we door in plaats van hier een tweede verblijfformulier te
+// bouwen. Het logboek heeft er al een, met datums, soort, cijfer en review, en
+// een eigen opslagpad ernaast zou volgens valkuil 4 vroeg of laat uit elkaar
+// lopen met dat van StayLog. Foto's kun je daar bovendien pas toevoegen nadat
+// het verblijf bestaat — dus je wilt er tóch eindigen.
+//
+// Wat hij niet doet: vragen op wélke dag het moet. Een activiteit komt in de
+// bibliotheek en die sleep je daarna in de planner op een dag. Een dagkeuze
+// hier zou de snelste weg — delen en klaar — weer traag maken.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { ChevronLeft, Loader2, MapPin, Check, ExternalLink } from 'lucide-react';
+import { ChevronLeft, Loader2, MapPin, Check, ExternalLink, Tent, Lightbulb } from 'lucide-react';
 import { COLORS } from '@/lib/data';
 import {
   getPin, extractUrl, labelBeforeUrl, isGoogleMapsUrl,
   parseMapsUrlClient, apiResolveMaps,
 } from '@/lib/maps';
+import { plekNaarParams } from '@/lib/deelPlek';
 
 export default function DeelOntvangen() {
   const params = useSearchParams();
@@ -60,7 +72,10 @@ export default function DeelOntvangen() {
       // vallen — precies zoals het locatieveld dat doet.
       const direct = parseMapsUrlClient(link);
       if (direct.coords) {
-        setPlek({ naam: direct.name || naamHint || 'Gedeelde plek', coords: direct.coords, bron: 'link' });
+        setPlek({
+          naam: direct.name || naamHint || 'Gedeelde plek',
+          coords: direct.coords, bron: 'link', link,
+        });
         setStatus('klaar');
         return;
       }
@@ -78,6 +93,9 @@ export default function DeelOntvangen() {
           coords: data.coords,
           adres: data.adres || data.description || null,
           bron: data.bron,
+          // Bewust de korte link die je deelde en niet data.finalUrl: die
+          // laatste is een regel of drie lang, en deze opent dezelfde plek.
+          link,
         });
         setStatus('klaar');
       } catch (e) {
@@ -184,13 +202,26 @@ export default function DeelOntvangen() {
             )}
 
             {plek.coords ? (
-              <button onClick={bewaar} disabled={bezigMetOpslaan} style={S.knop}>
-                {bezigMetOpslaan
-                  ? <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} />
-                  : '+ Toevoegen aan mijn ideeën'}
-              </button>
+              <div style={S.keuze}>
+                <button onClick={bewaar} disabled={bezigMetOpslaan} style={S.knop}>
+                  {bezigMetOpslaan
+                    ? <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} />
+                    : <><Lightbulb size={15} /> Bij mijn ideeën</>}
+                </button>
+                {/* Doorsturen in plaats van hier een tweede verblijfformulier:
+                    het logboek heeft er al een, mét datums, soort en cijfer. */}
+                <Link
+                  href={`/verblijven?${plekNaarParams({
+                    naam: plek.naam,
+                    coords: plek.coords,
+                    label: plek.adres,
+                    website: plek.link,
+                  })}`}
+                  style={{ ...S.knop, ...S.knopTweede, textDecoration: 'none' }}
+                ><Tent size={15} /> Als verblijf</Link>
+              </div>
             ) : (
-              <Link href="/" style={{ ...S.knop, textDecoration: 'none', textAlign: 'center' }}>
+              <Link href="/" style={{ ...S.knop, marginTop: 14, textDecoration: 'none' }}>
                 Openen in de planner
               </Link>
             )}
@@ -207,7 +238,7 @@ export default function DeelOntvangen() {
             <p style={{ fontSize: 12.5, color: COLORS.ink, lineHeight: 1.5, margin: '8px 0 14px' }}>
               Staat in je bibliotheek. Sleep hem in de planner op een dag.
             </p>
-            <Link href="/" style={{ ...S.knop, textDecoration: 'none', display: 'block' }}>
+            <Link href="/" style={{ ...S.knop, marginTop: 0, textDecoration: 'none' }}>
               Naar de planner
             </Link>
           </div>
@@ -262,12 +293,19 @@ const S = {
     background: 'rgba(58, 126, 132, 0.10)',
     fontSize: 11, color: COLORS.lake, lineHeight: 1.45,
   },
+  // Twee gelijkwaardige bestemmingen naast elkaar: welke je wilt hangt af van
+  // wat je deelt, niet van wat wij denken. Op een smal scherm onder elkaar.
+  keuze: { display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 14 },
   knop: {
-    width: '100%', marginTop: 14, padding: 13,
+    flex: '1 1 150px', padding: 13,
     background: COLORS.forest, color: COLORS.cream,
-    border: 'none', borderRadius: 10,
+    border: '1px solid transparent', borderRadius: 10, boxSizing: 'border-box',
     fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 600,
     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+  },
+  knopTweede: {
+    background: 'transparent', color: COLORS.forest,
+    borderColor: COLORS.forest,
   },
   uitweg: {
     display: 'inline-flex', alignItems: 'center', gap: 5,

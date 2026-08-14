@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import StayLog from '@/components/StayLog';
 
 export const metadata = {
@@ -6,5 +7,13 @@ export const metadata = {
 };
 
 export default function VerblijvenPage() {
-  return <StayLog />;
+  // Suspense-grens omdat StayLog `useSearchParams` gebruikt: daarmee vangt hij
+  // de plek op die de deelknop via /toevoegen doorstuurt. Zonder deze grens
+  // valt de build om op "missing suspense boundary" — zelfde patroon als
+  // app/toevoegen/page.jsx.
+  return (
+    <Suspense fallback={null}>
+      <StayLog />
+    </Suspense>
+  );
 }

@@ -34,7 +34,8 @@ eerst; is het al misgegaan, dan `rm -rf .next` en opnieuw starten.
 De tests draaien op `node --test` (in Node ingebouwd, geen extra afhankelijkheid) en staan
 in `test/`. Ze dekken de rekenkundige kern: `buildDays` en de override-regels in `data.js`,
 de reisgroepering in `stayLog.js`, de inpaklijst-invariant in `packing.js`, het opruimen van
-reservekopieën in `backup.js`, het uitlezen van Maps-links in `maps.js` en `mapsLink.js`, het samenvoegen van
+reservekopieën in `backup.js`, het uitlezen van Maps-links in `maps.js` en `mapsLink.js`,
+de gedeelde plek in `deelPlek.js`, het samenvoegen van
 meldingen in `errorLog.js`, de versiecontrole in `conflict.js`, de cachesleutels in
 `geoCache.js`, de reisstatistiek in `reisverslag.js`, de deel-link in `delen.js`,
 het rekenwerk in `uitgaven.js`, de offline-kopie in `offline.js`,
@@ -152,7 +153,7 @@ components/   Planner.jsx (planscherm), MapView.jsx, DayOverview.jsx,
   planner/    de sheets van het planscherm — zie hieronder
 lib/          data.js (palet, categorieën, buildDays, overrides), maps.js
               (Maps-links + PIN), mapsLink.js (link/HTML/adres uitlezen),
-              stayLog.js, stayTypes.js, backup.js, csv.js,
+              stayLog.js, stayTypes.js, backup.js, csv.js, deelPlek.js,
               bezoek.js, conflict.js, delen.js, errorLog.js, geoCache.js, packing.js,
               reisverslag.js, stayValidation.js, toegang.js, uitgaven.js,
               volgorde.js, routeDienst.js, weer.js, offline.js, redis.js,
@@ -470,6 +471,29 @@ service worker met fetch-handler, en die willen we niet (valkuil 19). Twee beper
 van het platform: het werkt alleen als de app op het beginscherm is **geïnstalleerd**,
 en **Safari/iOS kent Web Share Target niet** — op een iPhone blijft plakken de weg.
 `/toevoegen` heet bewust niet `/deel`: "delen" is in deze app al de meekijk-link.
+
+Vanaf `/toevoegen` gaan **twee wegen** verder, want een camping is iets anders dan een
+uitje: "Bij mijn ideeën" schrijft een activiteit in `customActivities` en doet dat ter
+plekke, en "Als verblijf" stuurt door naar `/verblijven` met het formulier voorgevuld.
+Dat tweede is bewust een doorverwijzing en geen tweede formulier — `StayForm` bestaat al
+mét datums, soort, cijfer en review, en `addStay()` regelt id, landafleiding en opslag.
+Een eigen opslagpad naar `/api/verblijven` ernaast zou volgens valkuil 4 uit elkaar gaan
+lopen, en foto's kun je toch pas toevoegen nadat het verblijf bestaat.
+
+De plek reist mee in de URL, en die querystring is invoer van buiten: `lib/deelPlek.js`
+bouwt en leest hem, met bereikcontrole op de coördinaten en `schoneWebsite()` over de
+link. Let op de valkuil die daar getest is — **`Number('')` is `0` en niet `NaN`**, dus
+zonder een expliciete lege-controle wordt een ontbrekende `lng` stilletjes een speld in
+de Golf van Guinee. `StayLog` wist de parameters daarna met `router.replace()`: anders
+opent elke verversing — en de focus-refresh doet er nog een — hetzelfde formulier
+opnieuw, en typ je je verblijf twee keer in.
+
+Wat er **niet** wordt voorgevuld: datums (die weten we niet) en het soort verblijf.
+OpenStreetMap zegt hooguit `caravan_site`, terwijl `STAY_TYPES` tent, caravan, camper en
+stacaravan onderscheidt; een voorselectie die er soms naast zit tik je niet weg. Het land
+komt langs de bestaande weg — `addStay()` roept `reverseCountry()` aan zodra er
+coördinaten maar geen land zijn — want één afleidingsweg is beter dan twee die uiteen
+kunnen lopen.
 
 **14. Reizen zijn afgeleid, niet opgeslagen.**
 `groepeerReizen()` in `lib/stayLog.js` plakt verblijven aan elkaar die in de tijd tegen
