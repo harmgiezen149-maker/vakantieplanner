@@ -1821,12 +1821,18 @@ export default function Planner() {
         // De planning meegeven, zodat wat je als bezocht hebt aangevinkt
         // mee het logboek in gaat.
         const r = await archiveTripStays(tripConfig, name, { plan, activityById });
-        if (r.added > 0) {
-          window.alert(
-            `${r.added} ${r.added === 1 ? 'verblijf' : 'verblijven'} bewaard in het logboek.` +
-            (r.skipped ? ` ${r.skipped} stond${r.skipped === 1 ? '' : 'en'} er al in.` : '') +
-            '\n\nJe vindt ze terug onder “Verblijven”.'
-          );
+        // Ook melden als er alleen is bijgewerkt. Dat dit vroeger aan `added`
+        // hing is precies waarom het onopgemerkt bleef toen het archiveren
+        // niets deed: het scherm bleef stil en daarna was de planning weg.
+        if (r.added > 0 || r.bijgewerkt > 0) {
+          const regels = [];
+          if (r.added > 0) {
+            regels.push(`${r.added} ${r.added === 1 ? 'verblijf' : 'verblijven'} bewaard in het logboek.`);
+          }
+          if (r.bijgewerkt > 0) {
+            regels.push(`${r.bijgewerkt} ${r.bijgewerkt === 1 ? 'verblijf stond' : 'verblijven stonden'} er al in en ${r.bijgewerkt === 1 ? 'is' : 'zijn'} bijgewerkt met wat je hebt aangevinkt als bezocht.`);
+          }
+          window.alert(regels.join('\n') + '\n\nJe vindt ze terug onder “Verblijven”.');
         }
       } catch (e) {
         window.alert(
@@ -1876,11 +1882,32 @@ export default function Planner() {
 
   // Losse functies (in plaats van closures in de JSX) omdat /beheer er
   // rechtstreeks naartoe kan linken: ?beheer=wissen of ?beheer=nieuw.
+  // Hoeveel bezoeken hangen er aan deze planning? Alleen wat op een dag staat
+  // én is aangevinkt telt: `bezoekPerVerblijf` koppelt op datum, dus een vinkje
+  // zonder dag valt bij geen enkel verblijf en is dus niets waard.
+  const aantalBezoeken = useMemo(() => {
+    const gezien = new Set();
+    for (const ids of Object.values(plan || {})) {
+      for (const id of ids || []) {
+        if (activityById[id]?.visited) gezien.add(id);
+      }
+    }
+    return gezien.size;
+  }, [plan, activityById]);
+
+  const bezoekZin = (n) => `${n} ${n === 1 ? 'activiteit die je hebt aangevinkt als bezocht' : 'activiteiten die je hebt aangevinkt als bezocht'}`;
+
   const vraagPlanningWissen = () => {
+    const basis = `Alle ${days.length || ''} dagen worden leeggemaakt. Eigen activiteiten en reisinstellingen blijven bewaard.`;
     setSheet({
       type: 'confirm',
       title: 'Hele planning wissen?',
-      message: `Alle ${days.length || ''} dagen worden leeggemaakt. Eigen activiteiten en reisinstellingen blijven bewaard.`,
+      // Het vinkje "bezocht" blijft op de activiteit staan, maar de dag
+      // eronder verdwijnt — en zonder dag valt een bezoek bij geen enkel
+      // verblijf. Dat is dus net zo goed weg, en dat hoor je te weten.
+      message: aantalBezoeken > 0
+        ? `${basis}\n\nLet op: ${bezoekZin(aantalBezoeken)} raakt daarmee de dag kwijt waarop je er was, en komt dan niet meer in het verblijvenlogboek. Open eerst “Verblijven” — dan worden ze vastgelegd.`
+        : basis,
       confirmText: 'Alles wissen',
       onConfirm: () => setPlan({}),
     });
@@ -1889,15 +1916,21 @@ export default function Planner() {
   const vraagNieuweVakantie = () => {
     const teArchiveren = (tripConfig.stays || []).length;
     const basis = 'De planning en eigen activiteiten worden gewist. Daarna stel je de nieuwe periode en verblijven in. De inpaklijst en auto-checklist blijven staan.';
+    const bezoekRegel = aantalBezoeken > 0
+      ? `\n\n${bezoekZin(aantalBezoeken)} ${aantalBezoeken === 1 ? 'gaat' : 'gaan'} mee naar het logboek.`
+      : '';
     setSheet({
       type: 'confirm',
       title: 'Nieuwe vakantie starten?',
       message: teArchiveren
-        ? `${basis}\n\nJe hebt ${teArchiveren} ${teArchiveren === 1 ? 'verblijf' : 'verblijven'} ingesteld. Wil je ${teArchiveren === 1 ? 'dat' : 'die'} eerst bewaren in het verblijvenlogboek, zodat je er later een cijfer en foto's aan kunt hangen?`
+        ? `${basis}\n\nJe hebt ${teArchiveren} ${teArchiveren === 1 ? 'verblijf' : 'verblijven'} ingesteld. Wil je ${teArchiveren === 1 ? 'dat' : 'die'} eerst bewaren in het verblijvenlogboek, zodat je er later een cijfer en foto's aan kunt hangen?${bezoekRegel}`
         : basis,
       confirmText: teArchiveren ? 'Bewaren en starten' : 'Nieuwe vakantie',
       onConfirm: () => archiveerEnStart(Boolean(teArchiveren)),
-      altText: teArchiveren ? 'Starten zonder bewaren' : undefined,
+      // De tekst zegt wat je opgeeft, want deze knop is onomkeerbaar.
+      altText: teArchiveren
+        ? (aantalBezoeken > 0 ? 'Starten zonder bewaren — bezoeken kwijt' : 'Starten zonder bewaren')
+        : undefined,
       onAlt: teArchiveren ? () => archiveerEnStart(false) : undefined,
     });
   };

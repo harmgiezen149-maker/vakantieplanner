@@ -604,6 +604,65 @@ export default function StayLog() {
     }
   };
 
+  // ── Het logboek houdt zichzelf bij ────────────────────────────────
+  //
+  // De momentopname op een verblijf moet niet afhangen van iemand die eraan
+  // denkt op "Bijwerken uit de planning" te drukken: wie dat vergeet en daarna
+  // een nieuwe vakantie start, is zijn vinkjes kwijt. Zolang de planning er nog
+  // staat vullen we bij het openen van deze pagina dus aan wat er ontbreekt.
+  //
+  // Vier regels, en ze zijn geen van alle vrijblijvend:
+  //
+  //  1. Eén keer per keer laden. De focus-refresh vuurt op deze pagina bij elke
+  //     terugkeer; opnieuw ophalen zou een verzoek per tabwissel betekenen.
+  //  2. Nooit terwijl `dirty` waar is — dat is het vangnet uit valkuil 4, en
+  //     een automatische aanvulling mag daar niet dwars doorheen schrijven.
+  //  3. Alleen opslaan als er echt iets bijkomt. Anders krijgt elk bezoek aan
+  //     deze pagina een nieuwe updatedAt en botst het gezin met zichzelf.
+  //  4. Stil falen. Geen planning te bereiken (offline, 401, nieuwe vakantie
+  //     al gestart) betekent: niets doen. Het is een aanvulling, geen taak.
+  const bijwerkenGedaan = useRef(false);
+  useEffect(() => {
+    if (loading || bijwerkenGedaan.current) return;
+    if (!stays.length) return;
+    bijwerkenGedaan.current = true;
+
+    (async () => {
+      if (dirty.current) return;
+      let data;
+      try {
+        const res = await fetch('/api/plan', {
+          headers: { 'X-Family-Pin': getPin() }, cache: 'no-store',
+        });
+        if (!res.ok) return;
+        data = await res.json();
+      } catch {
+        return;
+      }
+      if (dirty.current) return;
+      if (!data?.plan || !Object.keys(data.plan).length) return;
+
+      const perId = {};
+      for (const a of DEFAULT_ACTIVITIES) perId[a.id] = applyLocationOverride(a, data.locationOverrides || {});
+      for (const a of data.customActivities || []) perId[a.id] = a;
+
+      // bezoekPerVerblijf koppelt op datum, dus een verblijf uit 2019 krijgt
+      // vanzelf niets uit een planning van 2026.
+      const huidig = latest.current;
+      const perVerblijf = bezoekPerVerblijf(data.plan, perId, huidig);
+      let veranderd = false;
+      const volgende = huidig.map((s) => {
+        const gevonden = perVerblijf[s.id] || [];
+        if (!gevonden.length) return s;
+        const samen = voegBezoekToe(s.bezocht, gevonden);
+        if (samen.length === (s.bezocht || []).length) return s;
+        veranderd = true;
+        return { ...s, bezocht: samen, updatedAt: new Date().toISOString() };
+      });
+      if (veranderd) mutate(() => volgende);
+    })();
+  }, [loading, stays.length]);
+
   // Een bezoek dat niet uit de planning komt. Loopt langs dezelfde weg als de
   // rest — voegBezoekToe zorgt voor de sortering, updateStay voor het opslaan,
   // dus debounce, versiecontrole en de botsingsbalk gelden vanzelf.

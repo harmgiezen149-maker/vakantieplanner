@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  groepeerReizen, tripStayId, stayFromTripStay, hernoemReis,
+  groepeerReizen, tripStayId, stayFromTripStay, hernoemReis, verwerkReisInLogboek,
 } from '../lib/stayLog.js';
+import { maakBezoek, handmatigBezoek } from '../lib/bezoek.js';
 import { stayTypeLabel, countryFlag, STAY_TYPES } from '../lib/stayTypes.js';
 import { sanitizeStay, schoneWebsite } from '../lib/stayValidation.js';
 
@@ -249,4 +250,160 @@ test('twee aansluitende reizen verschillende namen geven trekt ze uit elkaar', (
   assert.equal(groepeerReizen(aaneen).length, 1, 'eerst één reis');
   const gesplitst = aaneen.map(s => (s.id === 'y' ? { ...s, tripTitle: 'Tweede reis' } : { ...s, tripTitle: 'Eerste reis' }));
   assert.equal(groepeerReizen(gesplitst).length, 2);
+});
+
+// ── Een reis in het logboek verwerken ───────────────────────────────
+//
+// Het geval dat hier centraal staat is echt gebeurd, op 16 augustus 2026: de
+// twee campings van de zomerreis stonden al in het logboek, dus werden ze
+// overgeslagen — en daarmee verdwenen vijftien net aangevinkte bezoeken, want
+// direct daarna werd de planning gewist.
+
+const reisVerblijf = (over = {}) => ({
+  id: 'stay_1', name: 'Domaine des Messires', coords: [48.1, 6.7],
+  startDate: '2026-07-26', endDate: '2026-08-08', ...over,
+});
+
+const bezoekje = (id, datum, naam = 'Iets') =>
+  maakBezoek({ id, name: naam, emoji: '📍', category: 'custom', coords: null }, datum);
+
+test('een verblijf dat er nog niet staat komt erbij, mét zijn bezoeken', () => {
+  const s = reisVerblijf();
+  const uit = verwerkReisInLogboek([], [s], { title: 'ZomerVakantie 2026' }, {
+    stay_1: [bezoekje('custom_1', '2026-07-27', 'Eguisheim')],
+  });
+  assert.equal(uit.added, 1);
+  assert.equal(uit.bijgewerkt, 0);
+  assert.equal(uit.stays.length, 1);
+  assert.equal(uit.stays[0].id, tripStayId(s));
+  assert.equal(uit.stays[0].tripTitle, 'ZomerVakantie 2026');
+  assert.deepEqual(uit.stays[0].bezocht.map(b => b.id), ['custom_1']);
+});
+
+test('een verblijf dat er al staat krijgt zijn nieuwe bezoeken erbij', () => {
+  // Dít is de bug. Voorheen: added 0, bijgewerkt bestond niet, niets bewaard.
+  const s = reisVerblijf();
+  const bestaand = {
+    id: tripStayId(s), name: 'Domaine des Messires', source: 'trip',
+    bezocht: [bezoekje('custom_oud', '2026-07-27')],
+  };
+  const uit = verwerkReisInLogboek([bestaand], [s], {}, {
+    stay_1: [
+      bezoekje('custom_oud', '2026-07-27'),
+      bezoekje('custom_nieuw', '2026-08-11', 'Place Guillaume II'),
+    ],
+  });
+  assert.equal(uit.added, 0, 'er komt geen verblijf bij');
+  assert.equal(uit.bijgewerkt, 1, 'maar er is wél iets veranderd');
+  assert.deepEqual(uit.stays[0].bezocht.map(b => b.id), ['custom_oud', 'custom_nieuw']);
+});
+
+test('het echte incident: twee bestaande campings, vijftien nieuwe bezoeken', () => {
+  const messires = reisVerblijf();
+  const clervaux = reisVerblijf({
+    id: 'stay_2', name: 'Camping Clervaux', startDate: '2026-08-08', endDate: '2026-08-15',
+  });
+  const stays = [
+    { id: tripStayId(messires), name: 'Domaine des Messires', score: 8, source: 'trip',
+      bezocht: Array.from({ length: 9 }, (_, i) => bezoekje(`oud_m_${i}`, '2026-07-30')) },
+    { id: tripStayId(clervaux), name: 'Camping Clervaux', score: 3, source: 'trip',
+      bezocht: Array.from({ length: 3 }, (_, i) => bezoekje(`oud_c_${i}`, '2026-08-09')) },
+  ];
+  const uit = verwerkReisInLogboek(stays, [messires, clervaux], {}, {
+    stay_1: stays[0].bezocht,
+    stay_2: [
+      ...stays[1].bezocht,
+      ...Array.from({ length: 15 }, (_, i) => bezoekje(`nieuw_${i}`, '2026-08-11')),
+    ],
+  });
+  assert.equal(uit.added, 0);
+  assert.equal(uit.bijgewerkt, 1, 'alleen Clervaux kreeg er iets bij');
+  assert.equal(uit.stays[0].bezocht.length, 9, 'Messires ongewijzigd');
+  assert.equal(uit.stays[1].bezocht.length, 18, '3 + 15');
+});
+
+test('cijfer, review en foto\'s van een bestaand verblijf blijven ongemoeid', () => {
+  const s = reisVerblijf();
+  const bestaand = {
+    id: tripStayId(s), name: 'Zelf hernoemd', score: 9,
+    review: 'Prachtig aan het water.', photos: [{ url: 'x', pathname: 'y' }],
+    website: 'https://camping.fr', typeOther: null, type: 'camping_caravan',
+    bezocht: [],
+  };
+  const uit = verwerkReisInLogboek([bestaand], [s], { title: 'Andere reis' }, {
+    stay_1: [bezoekje('custom_1', '2026-07-27')],
+  });
+  const na = uit.stays[0];
+  assert.equal(na.name, 'Zelf hernoemd', 'een tweede import hernoemt niet terug');
+  assert.equal(na.score, 9);
+  assert.equal(na.review, 'Prachtig aan het water.');
+  assert.equal(na.type, 'camping_caravan');
+  assert.deepEqual(na.photos, [{ url: 'x', pathname: 'y' }]);
+  assert.equal(na.bezocht.length, 1);
+});
+
+test('een aangepaste bezoekregel wordt niet overschreven', () => {
+  const s = reisVerblijf();
+  const bestaand = {
+    id: tripStayId(s),
+    // De gebruiker heeft de datum met de hand goedgezet.
+    bezocht: [bezoekje('custom_1', '2026-07-30', 'Eguisheim, met opa')],
+  };
+  const uit = verwerkReisInLogboek([bestaand], [s], {}, {
+    stay_1: [bezoekje('custom_1', '2026-07-27', 'Eguisheim')],
+  });
+  assert.equal(uit.bijgewerkt, 0, 'niets nieuws, dus niets veranderd');
+  assert.equal(uit.stays[0].bezocht[0].datum, '2026-07-30');
+  assert.equal(uit.stays[0].bezocht[0].name, 'Eguisheim, met opa');
+});
+
+test('een handmatig toegevoegd bezoek overleeft het archiveren', () => {
+  const s = reisVerblijf();
+  const hand = handmatigBezoek({ name: 'Zwemmen in het meer', datum: '2026-07-28' });
+  const uit = verwerkReisInLogboek([{ id: tripStayId(s), bezocht: [hand] }], [s], {}, {
+    stay_1: [bezoekje('custom_1', '2026-07-27')],
+  });
+  assert.equal(uit.bijgewerkt, 1);
+  const ids = uit.stays[0].bezocht.map(b => b.id);
+  assert.ok(ids.includes(hand.id), 'de hand_-regel staat er nog');
+  assert.ok(ids.includes('custom_1'));
+});
+
+test('niets nieuws betekent niets veranderd', () => {
+  const s = reisVerblijf();
+  const bestaand = { id: tripStayId(s), bezocht: [bezoekje('custom_1', '2026-07-27')], updatedAt: 'oud' };
+  const uit = verwerkReisInLogboek([bestaand], [s], {}, {
+    stay_1: [bezoekje('custom_1', '2026-07-27')],
+  });
+  assert.equal(uit.added, 0);
+  assert.equal(uit.bijgewerkt, 0);
+  assert.equal(uit.stays[0].updatedAt, 'oud', 'geen nodeloze updatedAt');
+  assert.equal(uit.stays[0], bestaand, 'het object is niet eens vervangen');
+});
+
+test('zonder bezoeken werkt archiveren als vanouds', () => {
+  const s = reisVerblijf();
+  const leeg = verwerkReisInLogboek([], [s], {}, {});
+  assert.equal(leeg.added, 1);
+  assert.deepEqual(leeg.stays[0].bezocht, []);
+
+  const bestaand = { id: tripStayId(s), score: 7, bezocht: [] };
+  const nogmaals = verwerkReisInLogboek([bestaand], [s], {}, {});
+  assert.equal(nogmaals.added, 0);
+  assert.equal(nogmaals.bijgewerkt, 0);
+  assert.equal(nogmaals.stays.length, 1, 'geen dubbele');
+});
+
+test('verblijven van andere reizen blijven onaangeroerd', () => {
+  const s = reisVerblijf();
+  const ander = { id: 'v_2019', name: 'Etnedal Noorwegen', score: 9, bezocht: [] };
+  const uit = verwerkReisInLogboek([ander], [s], {}, { stay_1: [bezoekje('custom_1', '2026-07-27')] });
+  assert.equal(uit.added, 1);
+  assert.equal(uit.stays[0], ander, 'het oude verblijf is niet eens aangeraakt');
+  assert.equal(uit.stays.length, 2);
+});
+
+test('een lege of ontbrekende lijst valt niet om', () => {
+  assert.deepEqual(verwerkReisInLogboek(null, null, {}, {}), { stays: [], added: 0, bijgewerkt: 0 });
+  assert.deepEqual(verwerkReisInLogboek([], [], {}), { stays: [], added: 0, bijgewerkt: 0 });
 });

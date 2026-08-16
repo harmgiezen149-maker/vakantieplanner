@@ -40,6 +40,7 @@ meldingen in `errorLog.js`, de versiecontrole in `conflict.js`, de cachesleutels
 `geoCache.js`, de reisstatistiek in `reisverslag.js`, de deel-link in `delen.js`,
 het rekenwerk in `uitgaven.js`, de offline-kopie in `offline.js`,
 de bezoekkoppeling in `bezoek.js`,
+het archiveren van een reis in `stayLog.js`,
 de routevolgorde in `volgorde.js`,
 het hernoemen van een reis in `stayLog.js`,
 het huidige verblijf en de activiteiten eromheen in `data.js`,
@@ -557,6 +558,33 @@ Zelfde afweging als bij de foto's.
 Aanvinken kan op drie plekken: op de chip in de planning, op `/dag`, en in de
 bibliotheek. Dat laatste is er omdat de planning lang niet altijd wordt gevolgd — je doet
 onderweg dingen die er niet in stonden.
+
+**Een vinkje is pas veilig als het in het logboek staat, en dáár ging het mis.**
+`visited: true` leeft in `planner:trip`; de momentopname komt er los van. Op 16 augustus
+2026 kostte dat vijftien bezoeken: beide campings stonden al in het logboek (met een
+`trip_*`-id uit een eerdere "Huidige reis toevoegen"), en `archiveTripStays()` sloeg
+bestaande verblijven volledig over — inclusief het net berekende bezoek. `toAdd` was leeg,
+de functie keerde om vóór `saveStayLog()`, en omdat de melding aan `added` hing bleef het
+scherm stil. Daarna wiste "Nieuwe vakantie starten" de planning. Drie dingen liggen sinds
+die dag vast:
+
+- **`verwerkReisInLogboek()` is puur en getest**, met dat geval als hoofdtest. Bestaande
+  verblijven krijgen hun bezoeken er voortaan bíj (`voegBezoekToe`, dus dedup op id en
+  bestaande regels blijven staan), en van zo'n verblijf wordt **alleen `bezocht`**
+  aangeraakt — cijfer, review, foto's en naam zijn van de gebruiker.
+- **Opslaan hangt aan `added || bijgewerkt`**, nooit meer aan `added` alleen. Dat gold ook
+  voor de melding: een archiveerslag die stilletjes niets doet is de gevaarlijkste variant.
+- **Het logboek vult zichzelf aan.** `StayLog` haalt bij het laden `/api/plan` op en werkt
+  ontbrekende bezoeken bij. Eén keer per keer laden (achter een ref, want de focus-refresh
+  vuurt hier vaak), nooit terwijl `dirty` waar is (valkuil 4), alleen opslaan als er echt
+  iets bijkomt, en stil falen als de planning onbereikbaar is. De knop "Bijwerken uit de
+  planning" blijft bestaan voor wie het nú wil.
+
+Let ook op **"Hele planning wissen"**: die laat `customActivities` staan, dus de
+`visited`-vlaggen overleven — maar `plan` gaat weg, en daarmee de dag waarop
+`bezoekPerVerblijf()` koppelt. Zonder dag valt een bezoek bij geen enkel verblijf, dus is
+het net zo goed weg. Beide wis-knoppen tellen daarom hoeveel bezoeken er op het spel staan
+en zeggen dat in de vraag.
 
 **En er is een vierde weg, die de planning helemaal overslaat.** Onder een verblijf staat
 "Zelf toevoegen" (`BezoekForm` in `StayLog.jsx`), want bij een camping uit 2003 valt er
