@@ -12,7 +12,7 @@ import {
 import {
   COLORS, formatDateRange, DEFAULT_ACTIVITIES, applyLocationOverride, CATEGORIES,
 } from '@/lib/data';
-import { bezoekPerVerblijf, voegBezoekToe, handmatigBezoek } from '@/lib/bezoek';
+import { bezoekPerVerblijf, voegBezoekToe, handmatigBezoek, pasBezoekAan } from '@/lib/bezoek';
 import { getPin } from '@/lib/maps';
 import { plekUitParams } from '@/lib/deelPlek';
 import LocationPicker from '@/components/LocationPicker';
@@ -416,6 +416,10 @@ export default function StayLog() {
   const [adding, setAdding] = useState(false);
   // Voorgevulde plek uit de deelknop (/toevoegen → "Als verblijf").
   const [gedeeldePlek, setGedeeldePlek] = useState(null);
+  // Idem, maar dan voor "Bij een verblijf": de plek zweeft tot je aanwijst
+  // waar hij hoort. Voor een camping van vroeger is dit de enige weg naar
+  // binnen — daar valt niets uit een planning te halen.
+  const [kiesVoorBezoek, setKiesVoorBezoek] = useState(null);
   const [importing, setImporting] = useState(false);
   const [uploadingFor, setUploadingFor] = useState(null);
   // Voortgang van het achteraf bepalen van landen: { done, total } | null
@@ -455,8 +459,12 @@ export default function StayLog() {
     const plek = plekUitParams(params);
     if (!plek) return;
     deelGedaan.current = true;
-    setGedeeldePlek(plek);
-    setAdding(true);
+    if (plek.doel === 'bezoek') {
+      setKiesVoorBezoek(plek);
+    } else {
+      setGedeeldePlek(plek);
+      setAdding(true);
+    }
     router.replace('/verblijven', { scroll: false });
   }, [params, router]);
 
@@ -670,6 +678,34 @@ export default function StayLog() {
     updateStay(stay.id, {
       bezocht: voegBezoekToe(stay.bezocht, [handmatigBezoek(velden)]),
     });
+  };
+
+  // Een bestaand bezoek bijstellen. Naam, datum en notitie zijn van de
+  // gebruiker; pasBezoekAan() houdt het id heel en sorteert opnieuw, want een
+  // gewijzigde datum verplaatst de regel.
+  const werkBezoekBij = (stay, bezoekId, patch) => {
+    updateStay(stay.id, { bezocht: pasBezoekAan(stay.bezocht, bezoekId, patch) });
+  };
+
+  // De gedeelde plek bij het aangewezen verblijf leggen. Daarna de kiesstand
+  // uit, het verblijf openklappen en ernaartoe scrollen: je moet kunnen zien
+  // dat het geland is, zeker in een lijst van bijna vijftig.
+  const legBezoekBij = (stay) => {
+    if (!kiesVoorBezoek) return;
+    voegHandmatigBezoekToe(stay, {
+      name: kiesVoorBezoek.naam || 'Gedeelde plek',
+      emoji: '📍',
+      category: 'custom',
+      note: kiesVoorBezoek.label || null,
+      coords: kiesVoorBezoek.coords || null,
+      datum: null,
+    });
+    setKiesVoorBezoek(null);
+    setExpandedId(stay.id);
+    setSelectedId(stay.id);
+    setTimeout(() => {
+      cardRefs.current[stay.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 60);
   };
 
   const setLocation = (id, loc) => {
@@ -1014,6 +1050,26 @@ export default function StayLog() {
           />
         )}
 
+        {/* Kiesstand: er zweeft een gedeelde plek en de vraag is alleen nog
+            waar hij hoort. Zolang deze balk staat heeft elke verblijfskaart een
+            knop "Hierbij". */}
+        {kiesVoorBezoek && (
+          <div style={S.kiesBalk}>
+            <Footprints size={17} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <strong>Waar was dit?</strong>
+              <div style={S.kiesPlek}>{kiesVoorBezoek.naam || 'Gedeelde plek'}</div>
+              <div style={S.kiesUitleg}>
+                Tik “Hierbij” bij het verblijf waar je vandaan kwam. Ook bij een
+                vakantie van jaren geleden.
+              </div>
+            </div>
+            <button onClick={() => setKiesVoorBezoek(null)} style={S.kiesAnnuleer} aria-label="Niet toevoegen">
+              <X size={15} />
+            </button>
+          </div>
+        )}
+
         {stats.alle > 0 && (
           <div style={S.statsRow}>
             <div>
@@ -1140,6 +1196,8 @@ export default function StayLog() {
                   onAddPhotos={(files) => addPhotos(stay.id, files)}
                   onBijwerkenBezoek={() => haalBezoekOp(stay)}
                   onVoegBezoekToe={(velden) => voegHandmatigBezoekToe(stay, velden)}
+                  onWerkBezoekBij={(bezoekId, patch) => werkBezoekBij(stay, bezoekId, patch)}
+                  onKiesVoorBezoek={kiesVoorBezoek ? () => legBezoekBij(stay) : null}
                   onVerwijderBezoek={(bezoekId) => updateStay(stay.id, {
                     bezocht: (stay.bezocht || []).filter(b => b.id !== bezoekId),
                   })}
@@ -1555,8 +1613,23 @@ const BezoekForm = ({ onSave, onSluit }) => {
   const [datum, setDatum] = useState('');
   const [note, setNote] = useState('');
   const [plaats, setPlaats] = useState(null);
-  const [toonLocatie, setToonLocatie] = useState(false);
+  // Of de gebruiker de naam zelf heeft aangeraakt. Zolang dat niet zo is mag
+  // een gekozen plek hem invullen; daarna niet meer, want dan overschrijven we
+  // wat iemand net intypte.
+  const [naamZelf, setNaamZelf] = useState(false);
   const [err, setErr] = useState('');
+
+  // Een plek kiezen — of een Maps-link plakken — vult meteen de naam in. Zonder
+  // dit kreeg je van een geplakte link wél de coördinaten maar géén naam, en
+  // weigerde het formulier met "Geef de activiteit een naam": precies de route
+  // die je wilde gebruiken liep dood.
+  const kiesPlaats = (loc) => {
+    setPlaats(loc);
+    if (!naamZelf && loc?.label) {
+      setNaam(String(loc.label).slice(0, 90));
+      setErr('');
+    }
+  };
 
   const submit = () => {
     const n = naam.trim();
@@ -1573,7 +1646,7 @@ const BezoekForm = ({ onSave, onSluit }) => {
       coords: plaats?.coords || null,
     });
     setNaam(''); setCat('custom'); setDatum(''); setNote('');
-    setPlaats(null); setToonLocatie(false); setErr('');
+    setPlaats(null); setNaamZelf(false); setErr('');
   };
 
   return (
@@ -1581,7 +1654,7 @@ const BezoekForm = ({ onSave, onSluit }) => {
       <input
         style={S.input}
         value={naam}
-        onChange={(e) => { setNaam(e.target.value.slice(0, 90)); setErr(''); }}
+        onChange={(e) => { setNaam(e.target.value.slice(0, 90)); setNaamZelf(true); setErr(''); }}
         onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
         placeholder="Wat heb je gedaan? Bv. Kasteel van Bouillon"
         autoFocus
@@ -1624,22 +1697,17 @@ const BezoekForm = ({ onSave, onSluit }) => {
         placeholder="Bv. mooi uitzicht, druk"
       />
 
-      {/* Locatie zit ingeklapt: de meeste regels zijn “we zijn er geweest”
-          zonder dat er een speld bij hoeft. */}
-      {toonLocatie ? (
-        <>
-          <div style={S.bezoekVeldLabel}>Locatie <span style={S.optioneel}>· mag leeg</span></div>
-          <LocationPicker
-            value={plaats}
-            onChange={setPlaats}
-            placeholder="Zoek een plek of plak een Maps-link"
-          />
-        </>
-      ) : (
-        <button type="button" onClick={() => setToonLocatie(true)} style={S.bezoekLocatieLink}>
-          <MapPin size={12} /> Locatie erbij
-        </button>
-      )}
+      {/* Dit veld zat ingeklapt, met als gedachte dat de meeste regels “we zijn
+          er geweest” zijn zonder dat er een speld bij hoeft. Dat maakte de
+          Maps-link-route onvindbaar, en dat weegt zwaarder dan één regel extra
+          in beeld — zeker bij een camping van vroeger, waar plakken de enige
+          snelle manier is om er iets bij te zetten. */}
+      <div style={S.bezoekVeldLabel}>Plek <span style={S.optioneel}>· mag leeg</span></div>
+      <LocationPicker
+        value={plaats}
+        onChange={kiesPlaats}
+        placeholder="Plak een Google Maps-link of zoek een plek"
+      />
 
       {err && <div style={S.formErr}>{err}</div>}
 
@@ -1650,6 +1718,57 @@ const BezoekForm = ({ onSave, onSluit }) => {
         <button style={S.bezoekKlaar} onClick={onSluit}>Klaar</button>
       </div>
     </div>
+  );
+};
+
+// ── Een bezoek bijstellen ───────────────────────────────────────────
+//
+// Alleen naam, datum en notitie. De coördinaten laten we met rust: die komen
+// van de kaart of uit een Maps-link, en met de hand een coördinaat bijstellen
+// wil niemand. Wil je de plek écht anders, dan haal je de regel weg en zet je
+// hem opnieuw neer.
+
+const BezoekBewerk = ({ bezoek, onOpslaan, onSluit }) => {
+  const [naam, setNaam] = useState(bezoek.name || '');
+  const [datum, setDatum] = useState(bezoek.datum || '');
+  const [note, setNote] = useState(bezoek.note || '');
+  const [err, setErr] = useState('');
+
+  const opslaan = () => {
+    const n = naam.trim();
+    if (!n) { setErr('Geef de activiteit een naam.'); return; }
+    // datum bewust ook als lege string doorgeven → null, zodat je een datum
+    // kunt wíssen. pasBezoekAan() kijkt op `undefined`, niet op falsy.
+    onOpslaan({ name: n, datum: datum || null, note: note.trim() || null });
+  };
+
+  return (
+    <li style={{ ...S.bezoekRegel, display: 'block' }}>
+      <input
+        style={S.input}
+        value={naam}
+        onChange={(e) => { setNaam(e.target.value.slice(0, 90)); setErr(''); }}
+        onKeyDown={(e) => { if (e.key === 'Enter') opslaan(); }}
+        placeholder="Naam"
+        autoFocus
+      />
+      <div style={S.bezoekVeldLabel}>Wanneer <span style={S.optioneel}>· mag leeg</span></div>
+      <input type="date" style={S.input} value={datum} onChange={(e) => setDatum(e.target.value)} />
+      <div style={S.bezoekVeldLabel}>Notitie <span style={S.optioneel}>· mag leeg</span></div>
+      <input
+        style={S.input}
+        value={note}
+        onChange={(e) => setNote(e.target.value.slice(0, 300))}
+        placeholder="Bv. mooi uitzicht, druk"
+      />
+      {err && <div style={S.formErr}>{err}</div>}
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        <button style={S.bezoekOpslaan} onClick={opslaan}>
+          <Check size={14} /> Opslaan
+        </button>
+        <button style={S.bezoekKlaar} onClick={onSluit}>Annuleren</button>
+      </div>
+    </li>
   );
 };
 
@@ -1780,10 +1899,13 @@ const ScorePicker = ({ value, onChange }) => (
 const StayCard = ({
   stay, selected, expanded, uploading, cardRef, reis,
   onToggle, onUpdate, onLocation, onBepaalLand, onRemove, onAddPhotos, onRemovePhoto,
-  onBijwerkenBezoek, onVerwijderBezoek, onVoegBezoekToe,
+  onBijwerkenBezoek, onVerwijderBezoek, onVoegBezoekToe, onWerkBezoekBij,
+  onKiesVoorBezoek,
 }) => {
   const fileRef = useRef(null);
   const [bezoekOpen, setBezoekOpen] = useState(false);
+  // Welk bezoek staat er open om aan te passen? Eén tegelijk.
+  const [bewerkBezoek, setBewerkBezoek] = useState(null);
   const period = formatDateRange(stay.startDate, stay.endDate) || stay.periodLabel || null;
   const typeLabel = stayTypeLabel(stay);
   const landLabel = stay.country
@@ -1799,6 +1921,13 @@ const StayCard = ({
         boxShadow: selected ? `0 0 0 2px ${scoreColor(stay.score)}22` : 'none',
       }}
     >
+      {/* In de kiesstand is dit de enige knop die telt: één tik en de gedeelde
+          plek hangt bij dit verblijf. Boven de kop, zodat je hem niet mist. */}
+      {onKiesVoorBezoek && (
+        <button onClick={onKiesVoorBezoek} style={S.hierbijKnop}>
+          <Footprints size={14} /> Hierbij
+        </button>
+      )}
       <div style={S.cardHead} onClick={onToggle}>
         <div style={{ ...S.scoreBadge, background: scoreColor(stay.score) }}>
           {stay.score != null ? String(stay.score).replace('.', ',') : '–'}
@@ -1967,22 +2096,38 @@ const StayCard = ({
           ) : (
             <ul style={S.bezoekLijst}>
               {(stay.bezocht || []).map((b) => (
-                <li key={b.id} style={S.bezoekRegel}>
-                  <span style={S.bezoekEmoji}>{b.emoji || '📍'}</span>
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <span style={S.bezoekNaam}>{b.name}</span>
-                    {(b.datum || b.note) && (
-                      <span style={S.bezoekMeta}>
-                        {[b.datum && formatDateRange(b.datum, b.datum), b.note].filter(Boolean).join(' · ')}
-                      </span>
+                bewerkBezoek === b.id ? (
+                  <BezoekBewerk
+                    key={b.id}
+                    bezoek={b}
+                    onOpslaan={(patch) => { onWerkBezoekBij(b.id, patch); setBewerkBezoek(null); }}
+                    onSluit={() => setBewerkBezoek(null)}
+                  />
+                ) : (
+                  <li key={b.id} style={S.bezoekRegel}>
+                    <span style={S.bezoekEmoji}>{b.emoji || '📍'}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={S.bezoekNaam}>{b.name}</span>
+                      {(b.datum || b.note) && (
+                        <span style={S.bezoekMeta}>
+                          {[b.datum && formatDateRange(b.datum, b.datum), b.note].filter(Boolean).join(' · ')}
+                        </span>
+                      )}
+                    </span>
+                    {onWerkBezoekBij && (
+                      <button
+                        onClick={() => setBewerkBezoek(b.id)}
+                        style={S.bezoekWis}
+                        aria-label={`${b.name} aanpassen`}
+                      ><Pencil size={12} /></button>
                     )}
-                  </span>
-                  <button
-                    onClick={() => onVerwijderBezoek(b.id)}
-                    style={S.bezoekWis}
-                    aria-label={`${b.name} weghalen`}
-                  ><X size={13} /></button>
-                </li>
+                    <button
+                      onClick={() => onVerwijderBezoek(b.id)}
+                      style={S.bezoekWis}
+                      aria-label={`${b.name} weghalen`}
+                    ><X size={13} /></button>
+                  </li>
+                )
               ))}
             </ul>
           )}
@@ -2119,6 +2264,37 @@ const S = {
     display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
     marginTop: 8, fontSize: 12, color: COLORS.ink,
   },
+  // ── Kiesstand: er zweeft een gedeelde plek ────────────────────────
+  kiesBalk: {
+    display: 'flex', alignItems: 'flex-start', gap: 10,
+    // Bovenaan én plakkend: dit is een stand waar de hele pagina in staat, en
+    // de lijst is lang. Zag je de balk alleen bovenin, dan scrolde je hem weg
+    // en wist je halverwege niet meer waar je naar zocht.
+    position: 'sticky', top: 0, zIndex: 20,
+    margin: '0 0 14px', padding: '12px 14px', borderRadius: 12,
+    background: '#DCE9EA', color: COLORS.lake,
+    border: `1px solid ${COLORS.lake}33`,
+    boxShadow: '0 4px 14px rgba(31,41,34,0.10)',
+    fontSize: 13, lineHeight: 1.45,
+  },
+  kiesPlek: {
+    fontFamily: "'Fraunces', serif", fontSize: 16,
+    color: COLORS.charcoal, marginTop: 2, lineHeight: 1.2,
+  },
+  kiesUitleg: { fontSize: 11.5, marginTop: 5, opacity: 0.85 },
+  kiesAnnuleer: {
+    border: 'none', background: 'transparent', color: COLORS.lake,
+    cursor: 'pointer', padding: 3, display: 'flex', flexShrink: 0,
+  },
+  hierbijKnop: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+    width: '100%', padding: '9px 12px',
+    border: 'none', borderBottom: `1px solid ${COLORS.hairline}`,
+    borderRadius: '13px 13px 0 0',
+    background: COLORS.lake, color: COLORS.cream,
+    fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600,
+    cursor: 'pointer',
+  },
   actions: { display: 'flex', gap: 8, flexWrap: 'wrap', margin: '16px 0 4px' },
   primaryBtn: {
     display: 'inline-flex', alignItems: 'center', gap: 7,
@@ -2234,12 +2410,6 @@ const S = {
     borderWidth: 1, borderStyle: 'solid',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     fontSize: 17, lineHeight: 1, padding: 0,
-  },
-  bezoekLocatieLink: {
-    display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 12,
-    background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
-    color: COLORS.lake, fontFamily: "'DM Sans', sans-serif",
-    fontSize: 12.5, fontWeight: 600, textDecoration: 'underline',
   },
   bezoekOpslaan: {
     display: 'inline-flex', alignItems: 'center', gap: 6,

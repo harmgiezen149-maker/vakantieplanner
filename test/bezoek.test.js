@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  dagBinnenVerblijf, bezoekPerVerblijf, maakBezoek, voegBezoekToe, handmatigBezoek,
+  dagBinnenVerblijf, bezoekPerVerblijf, maakBezoek, voegBezoekToe, handmatigBezoek, pasBezoekAan,
 } from '../lib/bezoek.js';
 
 const stay = (o) => ({ id: o.id || 's1', name: o.name || 'Camping', ...o });
@@ -197,4 +197,62 @@ test('bijwerken uit de planning laat een handmatige regel staan', () => {
   const uit = voegBezoekToe([hand], uitPlanning);
   assert.deepEqual(uit.map(b => b.name), ['Meer', 'Kasteel']);
   assert.equal(uit.filter(b => b.name === 'Kasteel').length, 1, 'en niet dubbel');
+});
+
+// ── een bezoek bijwerken ────────────────────────────────────────────
+
+const rij = () => [
+  maakBezoek({ id: 'a', name: 'Kasteel', emoji: '🏰', category: 'culture', coords: [50, 5] }, '2026-08-01'),
+  maakBezoek({ id: 'b', name: 'Museum', emoji: '🏛️', category: 'culture' }, '2026-08-09'),
+];
+
+test('naam, datum en notitie zijn achteraf recht te zetten', () => {
+  const uit = pasBezoekAan(rij(), 'a', { name: 'Kasteel van Bouillon', note: 'mooi uitzicht' });
+  const a = uit.find(b => b.id === 'a');
+  assert.equal(a.name, 'Kasteel van Bouillon');
+  assert.equal(a.note, 'mooi uitzicht');
+  assert.equal(a.datum, '2026-08-01', 'wat je niet meestuurt blijft staan');
+});
+
+test('het id blijft, want daarop dedupliceert voegBezoekToe', () => {
+  const uit = pasBezoekAan(rij(), 'a', { name: 'Anders', id: 'kaper' });
+  assert.ok(uit.some(b => b.id === 'a'));
+  assert.ok(!uit.some(b => b.id === 'kaper'), 'een id in de patch wordt genegeerd');
+});
+
+test('een gewijzigde datum verplaatst de regel in de lijst', () => {
+  const uit = pasBezoekAan(rij(), 'b', { datum: '2026-07-04' });
+  assert.deepEqual(uit.map(b => b.id), ['b', 'a']);
+});
+
+test('een datum wissen zet de regel achteraan', () => {
+  const uit = pasBezoekAan(rij(), 'a', { datum: null });
+  assert.deepEqual(uit.map(b => b.id), ['b', 'a']);
+  assert.equal(uit[1].datum, null);
+});
+
+test('de coördinaten blijven staan bij het bijwerken', () => {
+  const uit = pasBezoekAan(rij(), 'a', { name: 'Anders' });
+  assert.deepEqual(uit.find(b => b.id === 'a').coords, [50, 5]);
+});
+
+test('de klemmen op naam en notitie gelden ook bij bijwerken', () => {
+  const uit = pasBezoekAan(rij(), 'a', { name: 'N'.repeat(200), note: 'x'.repeat(500) });
+  const a = uit.find(b => b.id === 'a');
+  assert.equal(a.name.length, 90);
+  assert.equal(a.note.length, 300);
+});
+
+test('een onbekend id laat de lijst met rust, ook de volgorde', () => {
+  // Bewust door elkaar: raakt er niets, dan hoort er ook niets te verschuiven.
+  const voor = [...rij()].reverse();
+  const uit = pasBezoekAan(voor, 'bestaat-niet', { name: 'Hoi' });
+  assert.deepEqual(uit.map(b => b.id), voor.map(b => b.id), 'ongewijzigde volgorde');
+  assert.deepEqual(uit.map(b => b.name), voor.map(b => b.name));
+});
+
+test('bijwerken zonder id of lijst valt niet om', () => {
+  assert.deepEqual(pasBezoekAan([], 'a', { name: 'x' }), []);
+  assert.deepEqual(pasBezoekAan(null, 'a', { name: 'x' }), []);
+  assert.deepEqual(pasBezoekAan(rij(), null, { name: 'x' }).length, 2);
 });

@@ -473,9 +473,13 @@ van het platform: het werkt alleen als de app op het beginscherm is **geïnstall
 en **Safari/iOS kent Web Share Target niet** — op een iPhone blijft plakken de weg.
 `/toevoegen` heet bewust niet `/deel`: "delen" is in deze app al de meekijk-link.
 
-Vanaf `/toevoegen` gaan **twee wegen** verder, want een camping is iets anders dan een
-uitje: "Bij mijn ideeën" schrijft een activiteit in `customActivities` en doet dat ter
-plekke, en "Als verblijf" stuurt door naar `/verblijven` met het formulier voorgevuld.
+Vanaf `/toevoegen` gaan **drie wegen** verder, want een camping is iets anders dan een
+uitje, en een uitje van vroeger iets anders dan een idee voor straks: "Bij mijn ideeën"
+schrijft een activiteit in `customActivities` en doet dat ter plekke, "Als verblijf"
+stuurt door naar `/verblijven` met het formulier voorgevuld, en "Bij een verblijf dat er
+al staat" zet `/verblijven` in **kiesstand** — een plakkende balk bovenaan en een knop
+"Hierbij" op elke verblijfskaart. Dat laatste is de enige weg naar een camping van
+vroeger; daar valt niets uit een planning te halen.
 Dat tweede is bewust een doorverwijzing en geen tweede formulier — `StayForm` bestaat al
 mét datums, soort, cijfer en review, en `addStay()` regelt id, landafleiding en opslag.
 Een eigen opslagpad naar `/api/verblijven` ernaast zou volgens valkuil 4 uit elkaar gaan
@@ -483,7 +487,9 @@ lopen, en foto's kun je toch pas toevoegen nadat het verblijf bestaat.
 
 De plek reist mee in de URL, en die querystring is invoer van buiten: `lib/deelPlek.js`
 bouwt en leest hem, met bereikcontrole op de coördinaten en `schoneWebsite()` over de
-link. Let op de valkuil die daar getest is — **`Number('')` is `0` en niet `NaN`**, dus
+link. Waar hij naartoe moet staat in **`doel`** (`'verblijf'` of `'bezoek'`); **ontbreekt
+die, dan is het `'verblijf'`** — de links van vóór die parameter moeten blijven werken, en
+een onbekende waarde valt op diezelfde stand terug in plaats van een derde te verzinnen. Let op de valkuil die daar getest is — **`Number('')` is `0` en niet `NaN`**, dus
 zonder een expliciete lege-controle wordt een ontbrekende `lng` stilletjes een speld in
 de Golf van Guinee. `StayLog` wist de parameters daarna met `router.replace()`: anders
 opent elke verversing — en de focus-refresh doet er nog een — hetzelfde formulier
@@ -588,7 +594,14 @@ en zeggen dat in de vraag.
 
 **En er is een vierde weg, die de planning helemaal overslaat.** Onder een verblijf staat
 "Zelf toevoegen" (`BezoekForm` in `StayLog.jsx`), want bij een camping uit 2003 valt er
-niets uit een planning te halen: die heeft nooit bestaan. `handmatigBezoek()` in
+niets uit een planning te halen: die heeft nooit bestaan. Het locatieveld daarin stond
+eerst ingeklapt achter "Locatie erbij" — met als gedachte dat de meeste regels "we zijn er
+geweest" zijn zonder speld. Dat maakte de Maps-link-route onvindbaar, en erger: een
+geplakte link vulde wél de coördinaten maar níét de naam, waarna het formulier weigerde.
+Het veld staat nu open en **vult de naam uit de gekozen plek** zolang je zelf niets hebt
+ingetypt. Bijstellen kan achteraf met `pasBezoekAan()` in `lib/bezoek.js`: die houdt het
+id heel (daarop dedupliceert `voegBezoekToe`) en **sorteert opnieuw**, want een gewijzigde
+datum verplaatst de regel. `handmatigBezoek()` in
 `lib/bezoek.js` bouwt zo'n regel en geeft hem een id in een **eigen ruimte** (`hand_…`).
 Dat is het hele trucje: een `hand_`-id botst nooit met een `g_*` of `custom_*`, dus
 "Bijwerken uit de planning" laat de regel met rust in plaats van hem te overschrijven of

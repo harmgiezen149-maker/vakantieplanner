@@ -7,10 +7,13 @@
 // POST-doel vereist een service worker en die willen we bewust niet — valkuil
 // 19). De telefoon zet dan ?title=&text=&url= achter deze pagina.
 //
-// Er zijn twee bestemmingen, want een camping is iets anders dan een uitje:
+// Er zijn drie bestemmingen, want een camping is iets anders dan een uitje, en
+// een uitje van vroeger iets anders dan een idee voor straks:
 //
-//   "aan mijn ideeën"  → customActivities, hier ter plekke opgeslagen
+//   "bij mijn ideeën"  → customActivities, hier ter plekke opgeslagen
 //   "als verblijf"     → door naar /verblijven met het formulier voorgevuld
+//   "bij een verblijf" → door naar /verblijven in kiesstand, en dan als bezoek
+//                        aan een verblijf dat er al staat — ook eentje van 2019
 //
 // Dat tweede sturen we door in plaats van hier een tweede verblijfformulier te
 // bouwen. Het logboek heeft er al een, met datums, soort, cijfer en review, en
@@ -25,7 +28,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { ChevronLeft, Loader2, MapPin, Check, ExternalLink, Tent, Lightbulb } from 'lucide-react';
+import { ChevronLeft, Loader2, MapPin, Check, ExternalLink, Tent, Lightbulb, Footprints } from 'lucide-react';
 import { COLORS } from '@/lib/data';
 import {
   getPin, extractUrl, labelBeforeUrl, isGoogleMapsUrl,
@@ -219,6 +222,18 @@ export default function DeelOntvangen() {
                   })}`}
                   style={{ ...S.knop, ...S.knopTweede, textDecoration: 'none' }}
                 ><Tent size={15} /> Als verblijf</Link>
+                {/* De derde weg: aanhaken bij een verblijf dat er al staat. Voor
+                    een camping van vroeger is dit de enige — daar valt niets uit
+                    een planning te halen, die heeft nooit bestaan. */}
+                <Link
+                  href={`/verblijven?${plekNaarParams({
+                    naam: plek.naam,
+                    coords: plek.coords,
+                    label: plek.adres,
+                    doel: 'bezoek',
+                  })}`}
+                  style={{ ...S.knop, ...S.knopTweede, ...S.knopBreed, textDecoration: 'none' }}
+                ><Footprints size={15} /> Bij een verblijf dat er al staat</Link>
               </div>
             ) : (
               <Link href="/" style={{ ...S.knop, marginTop: 14, textDecoration: 'none' }}>
@@ -307,6 +322,9 @@ const S = {
     background: 'transparent', color: COLORS.forest,
     borderColor: COLORS.forest,
   },
+  // Over de volle breedte eronder: dit is de langste tekst van de drie, en op
+  // een telefoon breekt hij anders midden in een woord.
+  knopBreed: { flex: '1 1 100%' },
   uitweg: {
     display: 'inline-flex', alignItems: 'center', gap: 5,
     marginTop: 9, padding: '6px 11px', borderRadius: 8,
